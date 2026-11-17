@@ -288,14 +288,6 @@ function montarFolhaDados_(body, item) {
     c1.editAsText().setBold(!vazio).setFontSize(11).setForegroundColor(vazio ? '#aaaaaa' : '#1a3d8f');
   }
 
-  const nLidos = lidos.filter(l => l[1] && l[1] !== '—').length;
-  const nota = body.appendParagraph(nLidos
-    ? `${nLidos} campos lidos automaticamente ${item.fonte === 'IA' ? 'por IA' : 'por OCR'}` +
-      (item.corrigido ? ' e revistos pelo técnico.' : '. Confirme com as fotos da folha anterior.')
-    : 'Não foi possível ler dados nas fotos. Tire as fotos de perto, direitas e com boa luz.');
-  nota.editAsText().setBold(false).setFontSize(9).setForegroundColor('#777777');
-  nota.setSpacingBefore(8);
-
   if (x.obs) {
     const h = body.appendParagraph('Observações');
     h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
@@ -768,7 +760,7 @@ function doGet(e) {
       <div class="grupo">${esc_(info.grupo || '—')}</div>
     </div>
     ${extrasHtml_(info.extras)}
-    ${linhas ? `<div class="card"><div class="rotulo">DADOS DA ETIQUETA${info.fonte ? ' <small>· lidos por ' + esc_(info.fonte) + (info.corrigido ? ', revistos' : '') + '</small>' : ''}</div><table>${linhas}</table></div>` : ''}
+    ${linhas ? `<div class="card"><div class="rotulo">DADOS DA ETIQUETA</div><table>${linhas}</table></div>` : ''}
     <div class="card">
       <div class="rotulo">FOTOS (${fotos.length}) <small>· toque para ampliar</small></div>
       ${imgs || '<p>Sem fotos.</p>'}
