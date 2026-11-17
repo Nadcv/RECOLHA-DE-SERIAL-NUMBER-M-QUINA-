@@ -38,16 +38,24 @@ function limparExtras_(x) {
   x = x || {};
   const t = (v, n) => String(v || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
   const r = { tecnico: t(x.tecnico, 60), cliente: t(x.cliente, 80), local: t(x.local, 80),
-              obs: String(x.obs || '').trim().slice(0, 1000) };
+              obs: String(x.obs || '').trim().slice(0, 1000), assinadoPor: t(x.assinadoPor, 80) };
   Object.keys(r).forEach(k => { if (!r[k]) delete r[k]; });
+  const g = x.gps || {};
+  const lat = Number(g.lat), lon = Number(g.lon);
+  if (isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && (lat || lon)) {
+    r.gps = { lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6, prec: Math.round(Number(g.prec) || 0) };
+  }
   return r;
 }
 
-function extrasHtml_(x) {
+function extrasHtml_(x, dados, campos) {
   x = x || {};
-  const l = [['Cliente / Obra', x.cliente], ['Local', x.local], ['Técnico', x.tecnico], ['Observações', x.obs]]
+  const gar = garantia_(dados, campos);
+  const l = [['Cliente / Obra', x.cliente], ['Local', x.local], ['Técnico', x.tecnico], ['Observações', x.obs],
+             ['Garantia (estimada)', gar ? gar.texto : '']]
     .filter(c => c[1]).map(c => `<tr><th>${esc_(c[0])}</th><td>${esc_(c[1])}</td></tr>`).join('');
-  return l ? `<div class="card"><div class="rotulo">REGISTO</div><table>${l}</table></div>` : '';
+  const mapa = x.gps ? `<a class="botao sec" target="_blank" href="https://www.google.com/maps?q=${x.gps.lat},${x.gps.lon}">📍 Ver local no mapa</a>` : '';
+  return (l ? `<div class="card"><div class="rotulo">REGISTO</div><table>${l}</table></div>` : '') + mapa;
 }
 
 function validarEmails_(emails) {
@@ -99,7 +107,7 @@ function aplicarCodigos_(r, codigos) {
 
 const COLUNAS_FOLHA_ = ['Código de rastreio', 'Serial', 'Grupo', 'Cliente / Obra', 'Local', 'Técnico', 'Registado em', 'Estado',
   'Enviado em', 'Leitura', 'Modelo', 'Código', 'Serial etiqueta', 'EAN', 'Tensão', 'Refrigerante', 'Ano',
-  'Todos os campos', 'Observações', 'Ficha', 'Pasta', 'ID'];
+  'Garantia até', 'Localização', 'Assinado por', 'Todos os campos', 'Observações', 'Ficha', 'Pasta', 'ID'];
 
 /*
  * A folha "Registo de Seriais" é uma Google Sheet gerada a partir de um ficheiro de dados
@@ -200,6 +208,8 @@ function linhaFolha_(pasta, estado) {
     info.registadoEm || '', estado, info.enviadoEm && estado === 'Enviado' ? info.enviadoEm : '',
     (info.fonte || '') + (info.corrigido ? ' (revisto)' : ''),
     d.modelo || '', d.codigo || '', d.serial || '', d.ean || '', d.voltagem || '', d.refrigerante || '', d.ano || '',
+    (garantia_(d, info.campos) || {}).fim || '',
+    x.gps ? 'https://www.google.com/maps?q=' + x.gps.lat + ',' + x.gps.lon : '', x.assinadoPor || '',
     (info.campos || []).map(c => c[0] + ': ' + c[1]).join('\n'), x.obs || '',
     webApp + '?id=' + pasta.getId(), pasta.getUrl(), pasta.getId(),
   ];
@@ -393,4 +403,232 @@ function apiEtiquetasQR_(ids) {
   const pdf = destino.createFile(docFile.getAs(MimeType.PDF).setName('Etiquetas QR ' + data + '.pdf'));
   docFile.setTrashed(true);
   return { url: pdf.getUrl(), nome: pdf.getName(), n: itens.length };
+}
+
+
+/* ===================== IDIOMA DO RELATÓRIO ===================== */
+
+let IDIOMA_ = 'pt';
+/** Texto em português ou inglês, conforme o idioma escolhido no envio. */
+function T_(pt, en) { return IDIOMA_ === 'en' ? en : pt; }
+
+/* ===================== FOTO 3 E ASSINATURA ===================== */
+
+function fotoExtra_(f) {
+  return /^(foto3[_.\s-]|assinatura)/i.test(f.getName());
+}
+
+/** Na 2.ª folha: foto 3 (equipamento/local) à esquerda e assinatura à direita. */
+function blocoFoto3Assinatura_(body, item) {
+  try {
+    const c = tabelaInvisivel_(body, [270, 245]);
+    if (item.foto3) {
+      const h = c[0].getChild(0).asParagraph();
+      h.appendText(T_('Equipamento / local', 'Unit / site')).setFontSize(8).setBold(true).setForegroundColor('#555555');
+      const p = c[0].appendParagraph('');
+      const img = p.appendInlineImage(blobImagem_(item.foto3));
+      const k = Math.min(260 / img.getWidth(), 140 / img.getHeight());
+      img.setWidth(Math.round(img.getWidth() * k)).setHeight(Math.round(img.getHeight() * k));
+    }
+    if (item.assinatura) {
+      const x = item.extras || {};
+      const h = c[1].getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      h.appendText(T_('Assinatura', 'Signature')).setFontSize(8).setBold(true).setForegroundColor('#555555');
+      const p = c[1].appendParagraph('').setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      const img = p.appendInlineImage(item.assinatura.getBlob());
+      const k = Math.min(220 / img.getWidth(), 80 / img.getHeight());
+      img.setWidth(Math.round(img.getWidth() * k)).setHeight(Math.round(img.getHeight() * k));
+      const n = c[1].appendParagraph('______________________________\n' + (x.assinadoPor || '') +
+                                     (item.registadoEm ? '  ·  ' + item.registadoEm : ''))
+        .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      n.editAsText().setFontSize(8).setBold(false).setForegroundColor('#333333');
+    }
+  } catch (e) { Logger.log('Foto 3 / assinatura: ' + e.message); }
+}
+
+/* ===================== GARANTIA ===================== */
+
+/** Fim de garantia estimado: fim do ano de fabrico + GARANTIA_MESES. */
+function garantia_(dados, campos) {
+  const meses = Number(CONFIG.GARANTIA_MESES) || 0;
+  if (!meses) return null;
+  let ano = String((dados || {}).ano || '');
+  if (!/^(19|20)\d{2}$/.test(ano)) {
+    const c = (campos || []).find(x => /year|ano\b|fabrico|mfg/i.test(x[0]) && /\b(19|20)\d{2}\b/.test(x[1]));
+    ano = c ? c[1].match(/\b(19|20)\d{2}\b/)[0] : '';
+  }
+  if (!ano) return null;
+  const fim = new Date(Number(ano), 11, 31);
+  fim.setMonth(fim.getMonth() + meses);
+  const fimTxt = Utilities.formatDate(fim, Session.getScriptTimeZone(), 'MM/yyyy');
+  const valida = fim >= new Date();
+  return { fim: fimTxt, valida,
+           texto: T_('até ', 'until ') + fimTxt + (valida ? T_(' (válida)', ' (valid)') : T_(' (expirada)', ' (expired)')) };
+}
+
+/* ===================== TÉCNICOS (PIN POR PESSOA) ===================== */
+
+function hashPin_(pin) {
+  const b = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'seriais:' + String(pin));
+  return b.map(x => ('0' + ((x + 256) % 256).toString(16)).slice(-2)).join('');
+}
+function lerTecnicos_() {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('TECNICOS') || '[]'); } catch (e) { return []; }
+}
+function gravarTecnicos_(l) {
+  PropertiesService.getScriptProperties().setProperty('TECNICOS', JSON.stringify(l));
+}
+function tecnicoPorPin_(pin) {
+  const h = hashPin_(pin);
+  return lerTecnicos_().find(t => t.hash === h) || null;
+}
+function soAdmin_(pin) {
+  const u = verificarPin_(pin);
+  if (!u.admin) throw new Error('Só o responsável (código principal) pode fazer isto.');
+  return u;
+}
+function apiTecnicos_() {
+  return { tecnicos: lerTecnicos_().map(t => ({ id: t.id, nome: t.nome, ativo: t.ativo, criado: t.criado })) };
+}
+/** Cria ou altera um técnico. novoPin vazio = mantém o PIN (só ao alterar). */
+function apiTecnicoGuardar_(nome, novoPin, ativo, id) {
+  nome = String(nome || '').trim().slice(0, 60);
+  novoPin = String(novoPin || '').trim();
+  if (!nome) throw new Error('Escreva o nome do técnico.');
+  if (novoPin && !/^\d{4,8}$/.test(novoPin)) throw new Error('O PIN tem de ter 4 a 8 números.');
+  if (novoPin && novoPin === String(CONFIG.CODIGO_ACESSO)) throw new Error('Esse PIN é o código principal. Escolha outro.');
+  const l = lerTecnicos_();
+  if (novoPin && l.some(t => t.hash === hashPin_(novoPin) && t.id !== id)) throw new Error('Esse PIN já está a ser usado.');
+  let t = id ? l.find(x => x.id === id) : null;
+  if (id && !t) throw new Error('Técnico não encontrado.');
+  if (!t) {
+    if (!novoPin) throw new Error('Escolha um PIN para o técnico.');
+    t = { id: Utilities.getUuid().slice(0, 8), criado: agora_() };
+    l.push(t);
+  }
+  t.nome = nome;
+  t.ativo = ativo !== false;
+  if (novoPin) t.hash = hashPin_(novoPin);
+  gravarTecnicos_(l);
+  return apiTecnicos_();
+}
+function apiTecnicoRemover_(id) {
+  gravarTecnicos_(lerTecnicos_().filter(t => t.id !== id));
+  return apiTecnicos_();
+}
+
+/* ===================== PAINEL DE ESTATÍSTICAS ===================== */
+
+function apiEstatisticas_() {
+  folha_();
+  const reg = lerRegisto_();
+  const col = n => COLUNAS_FOLHA_.indexOf(n);
+  const linhas = Object.keys(reg).map(k => reg[k]);
+  const data = v => { const m = String(v || '').match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null; };
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const seg = new Date(hoje); seg.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7));
+  const iniMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const conta = (f) => { const o = {}; linhas.forEach(r => { const k = f(r) || '—'; o[k] = (o[k] || 0) + 1; });
+    return Object.keys(o).map(k => [k, o[k]]).sort((a, b) => b[1] - a[1]).slice(0, 8); };
+  const meses = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+    const k = Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/yyyy');
+    meses.push([k, linhas.filter(r => { const x = data(r[col('Registado em')] || r[col('Enviado em')]);
+      return x && x.getMonth() === d.getMonth() && x.getFullYear() === d.getFullYear(); }).length]);
+  }
+  const dias = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(hoje); d.setDate(hoje.getDate() - i);
+    dias.push([Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM'),
+      linhas.filter(r => { const x = data(r[col('Registado em')] || r[col('Enviado em')]); return x && x.getTime() === d.getTime(); }).length]);
+  }
+  const desde = (ini) => linhas.filter(r => { const x = data(r[col('Registado em')] || r[col('Enviado em')]); return x && x >= ini; }).length;
+  return {
+    total: linhas.length,
+    porEnviar: linhas.filter(r => r[col('Estado')] === 'Por enviar').length,
+    hoje: desde(hoje), semana: desde(seg), mes: desde(iniMes),
+    garantiaExpirada: linhas.filter(r => { const g = String(r[col('Garantia até')] || '').match(/(\d{2})\/(\d{4})/);
+      return g && new Date(+g[2], +g[1], 0) < hoje; }).length,
+    porMes: meses, porDia: dias,
+    porCliente: conta(r => r[col('Cliente / Obra')]), porModelo: conta(r => r[col('Modelo')]),
+    porTecnico: conta(r => r[col('Técnico')]), porGrupo: conta(r => r[col('Grupo')]),
+    folha: folhaUrl_(),
+  };
+}
+
+/* ===================== RELATÓRIO MENSAL ===================== */
+
+/** Cria (uma vez) o envio automático no dia 1 de cada mês às 8h. */
+function garantirAgendamentoMensal_() {
+  if (!CONFIG.RELATORIO_MENSAL) return;
+  const cache = CacheService.getScriptCache();
+  if (cache.get('mensal_ok')) return;
+  const existe = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'relatorioMensal');
+  if (!existe) ScriptApp.newTrigger('relatorioMensal').timeBased().onMonthDay(1).atHour(8).create();
+  cache.put('mensal_ok', '1', 21600);
+}
+
+/** Chamado pelo agendamento: resumo do mês anterior para os destinatários habituais. */
+function relatorioMensal() {
+  relatorioMensal_('', '');
+}
+
+/** mes: 'MM/yyyy' (vazio = mês anterior). Envia o resumo e a folha em Excel. */
+function relatorioMensal_(emails, mes) {
+  folha_();
+  const reg = lerRegisto_();
+  const col = n => COLUNAS_FOLHA_.indexOf(n);
+  let alvo;
+  const m = String(mes || '').match(/^(\d{2})\/(\d{4})$/);
+  if (m) alvo = new Date(+m[2], +m[1] - 1, 1);
+  else { const h = new Date(); alvo = new Date(h.getFullYear(), h.getMonth() - 1, 1); }
+  const nomeMes = Utilities.formatDate(alvo, Session.getScriptTimeZone(), 'MM/yyyy');
+  const doMes = Object.keys(reg).map(k => reg[k]).filter(r => {
+    const x = String(r[col('Registado em')] || r[col('Enviado em')] || '').match(/\d{2}\/(\d{2})\/(\d{4})/);
+    return x && +x[1] === alvo.getMonth() + 1 && +x[2] === alvo.getFullYear();
+  });
+  const conta = (i) => { const o = {}; doMes.forEach(r => { const k = r[i] || '—'; o[k] = (o[k] || 0) + 1; });
+    return Object.keys(o).map(k => [k, o[k]]).sort((a, b) => b[1] - a[1]); };
+  const tabela = (titulo, l) => !l.length ? '' : `<p style="margin:16px 0 4px;font-weight:bold;color:#3a393a">${esc_(titulo)}</p>
+    <table cellpadding="6" style="border-collapse:collapse;font-size:13px">${l.map(([k, v]) =>
+      `<tr><td style="border-bottom:1px solid #eee;min-width:220px">${esc_(k)}</td><td style="border-bottom:1px solid #eee;font-weight:bold;text-align:right">${v}</td></tr>`).join('')}</table>`;
+  const lista = doMes.slice(0, 200).map(r => `<tr>
+      <td style="border-bottom:1px solid #eee;font-family:monospace;color:#c9272e">${esc_(r[col('Código de rastreio')])}</td>
+      <td style="border-bottom:1px solid #eee"><a href="${r[col('Ficha')]}" style="color:#222">${esc_(r[col('Serial')])}</a></td>
+      <td style="border-bottom:1px solid #eee">${esc_(r[col('Grupo')])}</td>
+      <td style="border-bottom:1px solid #eee">${esc_(r[col('Cliente / Obra')])}</td>
+      <td style="border-bottom:1px solid #eee">${esc_(r[col('Registado em')])}</td></tr>`).join('');
+  const html = `<div style="font-family:Arial,sans-serif;max-width:680px;color:#222">
+    ${CONFIG.LOGOTIPOS ? '<p><img src="cid:logoCablotec" height="40" alt="Cablotec"></p>' : ''}
+    <div style="background:#3a393a;color:#fff;padding:16px 20px;border-top:4px solid #c9272e">
+      <div style="font-size:19px;font-weight:bold">Resumo mensal de registos – ${nomeMes}</div></div>
+    <p>Exmos. Senhores,</p>
+    <p>Segue o resumo dos equipamentos registados em <b>${nomeMes}</b>: <b>${doMes.length}</b> equipamento(s).
+       Em anexo encontra-se a folha de registo completa em formato Excel.</p>
+    ${tabela('Por cliente / obra', conta(col('Cliente / Obra')))}
+    ${tabela('Por técnico', conta(col('Técnico')))}
+    ${tabela('Por modelo', conta(col('Modelo')))}
+    ${lista ? `<p style="margin:16px 0 4px;font-weight:bold;color:#3a393a">Equipamentos</p>
+      <table cellpadding="6" style="border-collapse:collapse;font-size:12px"><tr style="background:#f0f0f0">
+      <th align="left">Código</th><th align="left">Serial</th><th align="left">Grupo</th><th align="left">Cliente</th><th align="left">Registado</th></tr>${lista}</table>` : ''}
+    <p style="margin-top:22px">Com os melhores cumprimentos,</p>
+    <p style="border-left:4px solid #c9272e;padding-left:10px"><b style="color:#c9272e">Aplicação Cablotec</b><br>
+      <span style="color:#555">Geração de Etiquetas e Registo de Equipamentos</span><br>
+      <span style="color:#888;font-size:12px">Cablotec – Cablagens e Sistemas, Lda</span></p></div>`;
+  const anexos = [];
+  try {
+    const id = PropertiesService.getScriptProperties().getProperty('FOLHA_ID');
+    const res = UrlFetchApp.fetch('https://docs.google.com/spreadsheets/d/' + id + '/export?format=xlsx',
+      { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+    if (res.getResponseCode() === 200) anexos.push(res.getBlob().setName('Registo de Seriais ' + nomeMes.replace('/', '-') + '.xlsx'));
+  } catch (e) { Logger.log('Excel: ' + e.message); }
+  MailApp.sendEmail({
+    to: emails || CONFIG.EMAIL_DESTINO,
+    subject: `Resumo mensal de registos – ${nomeMes} – ${doMes.length} equipamento(s)`,
+    name: 'Cablotec – Geração de Etiquetas',
+    htmlBody: html, attachments: anexos,
+    inlineImages: CONFIG.LOGOTIPOS ? { logoCablotec: logoBlob_('cablotec') } : {},
+  });
+  return { mes: nomeMes, equipamentos: doMes.length, excel: anexos.length > 0 };
 }

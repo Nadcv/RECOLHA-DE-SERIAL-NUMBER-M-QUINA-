@@ -76,7 +76,9 @@ const CONFIG = {
   // Molduras da folha (pontos; A4 útil ≈ 515 x 770)
   FOLHA_DADOS: true,
   LOGOTIPOS: true,                          // logótipo Cablotec (emissor) e do cliente no PDF, email e ficha
-  CLIENTE_NOME: 'Aralab',                   // cliente principal (aparece como "Cliente" com o logótipo)
+  CLIENTE_NOME: 'Aralab',
+  GARANTIA_MESES: 24,                       // garantia estimada, contada a partir do fim do ano de fabrico
+  RELATORIO_MENSAL: true,                   // dia 1 de cada mês: resumo do mês anterior + folha em Excel                   // cliente principal (aparece como "Cliente" com o logótipo)
   GEMINI_API_KEY: '',                       // chave grátis em aistudio.google.com: lê TUDO das etiquetas com IA
   GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash-lite e, se falhar, flash)
   GEMINI_MAX_DIA: 200,                      // máximo de leituras por IA por dia (o resto usa OCR)                        // 2.ª folha com os dados lidos nas fotos
@@ -92,11 +94,12 @@ function enviarRelatorio() {
   return enviarRelatorioPara_();
 }
 
-function enviarRelatorioPara_(ids, emails) {
+function enviarRelatorioPara_(ids, emails, idioma) {
   // Evita dois envios ao mesmo tempo (app + agendamento)
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) throw new Error('Já está a ser enviado um relatório. Tente daqui a pouco.');
-  try { return enviarRelatorio__(ids, emails); } finally { lock.releaseLock(); }
+  IDIOMA_ = idioma === 'en' ? 'en' : 'pt';
+  try { return enviarRelatorio__(ids, emails); } finally { lock.releaseLock(); IDIOMA_ = 'pt'; }
 }
 
 /** ids: só estas pastas (vazio = todas por enviar); emails: destinatários (vazio = EMAIL_DESTINO). */
@@ -151,20 +154,24 @@ function enviarRelatorio__(ids, emails) {
   if (paginas > itens.length * (CONFIG.FOLHA_DADOS ? 2 : 1)) Logger.log('Aviso: o PDF tem ' + paginas + ' páginas.');
 
   // 3) Enviar email
-  const quandoTxt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy 'às' HH:mm");
+  const quandoTxt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), T_("dd/MM/yyyy 'às' HH:mm", "dd/MM/yyyy 'at' HH:mm"));
   MailApp.sendEmail({
     to: para,
-    subject: `Relatório de Registo de Equipamentos – ${itens.length} equipamento${itens.length === 1 ? '' : 's'} – ` +
+    subject: T_(`Relatório de Registo de Equipamentos – ${itens.length} equipamento${itens.length === 1 ? '' : 's'} – `,
+                `Equipment Registration Report – ${itens.length} unit${itens.length === 1 ? '' : 's'} – `) +
              Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy'),
-    name: 'Cablotec – Geração de Etiquetas',
+    name: T_('Cablotec – Geração de Etiquetas', 'Cablotec – Label Generation'),
     htmlBody: corpoEmail_(itens, quandoTxt),
     body: textoEmail_(itens, quandoTxt),
     attachments: [pdf],
     inlineImages: CONFIG.LOGOTIPOS ? { logoCablotec: logoBlob_('cablotec'), logoCliente: logoBlob_('aralab') } : {},
   });
 
-  // 4) Ficha individual dentro da pasta de cada serial (é o que o QR abre)
+  // 4) Ficha individual dentro da pasta de cada serial (sempre em português)
+  const idiomaEnvio = IDIOMA_;
+  IDIOMA_ = 'pt';
   if (CONFIG.GUARDAR_FICHA_NA_PASTA) itens.forEach(guardarFicha_);
+  IDIOMA_ = idiomaEnvio;
 
   // 5) Arrumar
   pasta.createFile(pdf);          // guarda uma cópia do PDF na pasta principal
@@ -200,16 +207,20 @@ function lerSubpastas_(pasta) {
     const grupo = partes.join(' ').trim();
 
     const fotos = [];
+    let foto3 = null, assinatura = null;
     const files = sub.getFiles();
     while (files.hasNext()) {
       const f = files.next();
-      if (f.getMimeType().indexOf('image/') === 0) fotos.push(f);
+      if (f.getMimeType().indexOf('image/') !== 0) continue;
+      if (/^assinatura/i.test(f.getName())) assinatura = f;
+      else if (/^foto3[_.\s-]/i.test(f.getName())) foto3 = f;
+      else fotos.push(f);
     }
     if (fotos.length === 0) continue;
 
     fotos.sort((a, b) => a.getName().localeCompare(b.getName()));
     const [foto1, foto2] = escolherFotos_(fotos);
-    lista.push({ pasta: sub, serial, grupo, fotos, foto1, foto2, dados: null });
+    lista.push({ pasta: sub, serial, grupo, fotos, foto1, foto2, foto3, assinatura, dados: null });
   }
   lista.sort((a, b) => a.serial.localeCompare(b.serial, undefined, { numeric: true }));
   return lista;
@@ -219,7 +230,7 @@ function lerSubpastas_(pasta) {
 function escolherFotos_(fotos) {
   const f1 = fotos.find(f => /^foto1[_.\s-]/i.test(f.getName()));
   const f2 = fotos.find(f => /^foto2[_.\s-]/i.test(f.getName()));
-  const resto = fotos.filter(f => f !== f1 && f !== f2);
+  const resto = fotos.filter(f => f !== f1 && f !== f2 && !fotoExtra_(f));
   return [f1 || resto.shift() || null, f2 || resto.shift() || null];
 }
 
@@ -237,14 +248,14 @@ function montarPagina_(body, item) {
   if (item.qr) {
     const pq = l1[1].getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
     pq.appendInlineImage(item.qr.copyBlob()).setWidth(80).setHeight(80);
-    const pl = l1[1].appendParagraph('Ver ficha').setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+    const pl = l1[1].appendParagraph(T_('Ver ficha', 'View record')).setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
     pl.editAsText().setFontSize(7).setForegroundColor('#666666').setLinkUrl(item.link);
   }
   espaco_(body, 8);
 
   // 2) INFORMAÇÃO DO GRUPO (caixa ao centro-direita)
   const l2 = tabelaInvisivel_(body, [170, 345]);
-  caixaTexto_(l2[1], [['INFORMAÇÃO DO GRUPO: ', 11, '#000000'], [item.grupo || '—', 15, '#c9272e']]);
+  caixaTexto_(l2[1], [[T_('INFORMAÇÃO DO GRUPO: ', 'GROUP INFORMATION: '), 11, '#000000'], [item.grupo || '—', 15, '#c9272e']]);
 
   // 3) Seta
   const seta = body.appendParagraph('⇩').setAlignment(DocumentApp.HorizontalAlignment.CENTER);
@@ -255,11 +266,11 @@ function montarPagina_(body, item) {
   const m = CONFIG.MOLDURA1;
   const lado = Math.round((515 - m.largura) / 2);
   const l3 = tabelaInvisivel_(body, [lado, m.largura, lado]);
-  moldura_(l3[1], item.foto1, m, 'Foto 1 – etiqueta grande');
+  moldura_(l3[1], item.foto1, m, T_('Foto 1 – etiqueta grande', 'Photo 1 – rating plate'));
   espaco_(body, 12);
 
   // 5) Moldura 2 – etiqueta pequena (largura toda)
-  moldura_(body, item.foto2, CONFIG.MOLDURA2, 'Foto 2 – etiqueta pequena');
+  moldura_(body, item.foto2, CONFIG.MOLDURA2, T_('Foto 2 – etiqueta pequena', 'Photo 2 – barcode label'));
 
   // 6) Segunda folha: dados lidos das etiquetas
   if (CONFIG.FOLHA_DADOS) {
@@ -279,25 +290,31 @@ const CAMPOS_ETIQUETA_ = [
 function montarFolhaDados_(body, item) {
   const d = item.dados || {};
   cabecalhoLogos_(body);
-  const titulo = body.appendParagraph('DADOS LIDOS DAS ETIQUETAS');
+  const titulo = body.appendParagraph(T_('DADOS LIDOS DAS ETIQUETAS', 'LABEL DATA'));
   titulo.editAsText().setBold(true).setFontSize(15).setForegroundColor('#000000');
   titulo.setSpacingBefore(0).setSpacingAfter(4);
-  const sub = body.appendParagraph(`Serial ${item.serial}  ·  Grupo ${item.grupo || '—'}` +
-                                   (item.registadoEm ? `  ·  Registado em ${item.registadoEm}` : ''));
+  const sub = body.appendParagraph(`Serial ${item.serial}  ·  ${T_('Grupo', 'Group')} ${item.grupo || '—'}` +
+                                   (item.registadoEm ? `  ·  ${T_('Registado em', 'Registered on')} ${item.registadoEm}` : ''));
   sub.editAsText().setBold(false).setFontSize(10).setForegroundColor('#555555');
   sub.setSpacingAfter(10);
 
   const lidos = (item.campos && item.campos.length) ? item.campos
     : CAMPOS_ETIQUETA_.map(([k, nome]) => [nome, d[k] || '—']);
   const x = item.extras || {};
-  const linhas = [['SERIAL NO', item.serial || '—'], ['INFORMAÇÃO DO GRUPO', item.grupo || '—']]
-    .concat([['Cliente / Obra', x.cliente], ['Local', x.local], ['Técnico', x.tecnico]].filter(l => l[1]))
+  const gar = garantia_(item.dados, item.campos);
+  const linhas = [['SERIAL NO', item.serial || '—'], [T_('INFORMAÇÃO DO GRUPO', 'GROUP INFORMATION'), item.grupo || '—']]
+    .concat([[T_('Cliente / Obra', 'Customer / Site'), x.cliente], [T_('Local', 'Location'), x.local],
+             [T_('Técnico', 'Technician'), x.tecnico],
+             [T_('Coordenadas GPS', 'GPS coordinates'), x.gps ? x.gps.lat.toFixed(5) + ', ' + x.gps.lon.toFixed(5) : ''],
+             [T_('Garantia (estimada)', 'Warranty (estimated)'), gar ? gar.texto : '']].filter(l => l[1]))
     .concat(lidos.map(([n, v]) => [String(n), String(v || '—')]));
+  const blocoExtra = !!(item.foto3 || item.assinatura);
   const t = body.appendTable(linhas);
   t.setBorderWidth(1).setBorderColor('#999999');
   // Com muitos campos a tabela fica mais compacta, para caber sempre numa folha
   const n = t.getNumRows();
-  const [pad, fN, fV] = n <= 18 ? [5, 10, 11] : n <= 28 ? [2, 9, 10] : [1, 8, 9];
+  const lim = blocoExtra ? [12, 22] : [18, 28];   // com foto 3 / assinatura sobra menos espaço
+  const [pad, fN, fV] = n <= lim[0] ? [5, 10, 11] : n <= lim[1] ? [2, 9, 10] : [1, 8, 9];
   for (let r = 0; r < n; r++) {
     const c0 = t.getCell(r, 0).setWidth(190).setBackgroundColor('#f0f2f6');
     const c1 = t.getCell(r, 1);
@@ -314,14 +331,14 @@ function montarFolhaDados_(body, item) {
   }
 
   if (x.obs) {
-    const h = body.appendParagraph('Observações');
+    const h = body.appendParagraph(T_('Observações', 'Notes'));
     h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
     h.setSpacingBefore(14).setSpacingAfter(2);
     body.appendParagraph(x.obs).editAsText().setBold(false).setFontSize(10).setForegroundColor('#222222');
   }
 
-  if (item.fonte !== 'IA' && item.textoOCR && item.textoOCR.trim()) {
-    const h = body.appendParagraph('Texto completo lido nas fotos');
+  if (item.fonte !== 'IA' && !blocoExtra && item.textoOCR && item.textoOCR.trim()) {
+    const h = body.appendParagraph(T_('Texto completo lido nas fotos', 'Full text read from the photos'));
     h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
     h.setSpacingBefore(16).setSpacingAfter(4);
     const txt = item.textoOCR.replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
@@ -329,10 +346,13 @@ function montarFolhaDados_(body, item) {
     p.editAsText().setBold(false).setFontSize(8).setForegroundColor('#555555').setFontFamily('Courier New');
   }
 
+  // Foto 3 (equipamento / local) e assinatura, lado a lado
+  if (blocoExtra) blocoFoto3Assinatura_(body, item);
+
   // Código de rastreio único deste registo
   if (item.pasta) {
     const cod = codigoRastreio_(item.pasta, item.registadoEm);
-    const r = body.appendParagraph('Código de rastreio: ');
+    const r = body.appendParagraph(T_('Código de rastreio: ', 'Tracking code: '));
     r.setSpacingBefore(18);
     r.editAsText().setBold(false).setFontSize(9).setForegroundColor('#555555').setFontFamily('Arial');
     r.appendText(cod).setBold(true).setFontSize(11).setForegroundColor('#c9272e').setFontFamily('Courier New');
@@ -348,7 +368,7 @@ function cabecalhoLogos_(body) {
     const le = pe.appendInlineImage(logoBlob_('cablotec'));
     le.setWidth(Math.round(24 * le.getWidth() / le.getHeight())).setHeight(24);
     const pd = c[1].getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
-    pd.appendText('Cliente  ').setFontSize(7).setForegroundColor('#888888').setBold(false);
+    pd.appendText(T_('Cliente  ', 'Customer  ')).setFontSize(7).setForegroundColor('#888888').setBold(false);
     const ld = pd.appendInlineImage(logoBlob_('aralab'));
     ld.setWidth(Math.round(20 * ld.getWidth() / ld.getHeight())).setHeight(20);
     const linha = body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(2);
@@ -387,7 +407,7 @@ function moldura_(container, foto, tam, legenda) {
                 .setVerticalAlignment(DocumentApp.VerticalAlignment.CENTER);
   const p = cell.getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.CENTER);
   if (!foto) {
-    p.appendText('(' + legenda + ' em falta)').setFontSize(10).setForegroundColor('#999999');
+    p.appendText('(' + legenda + T_(' em falta)', ' missing)')).setFontSize(10).setForegroundColor('#999999');
   } else {
     try {
       const img = p.appendInlineImage(blobImagem_(foto));
@@ -730,16 +750,16 @@ function corpoEmail_(itens, quando) {
       <td style="${td}white-space:nowrap">${esc_(it.grupo || '—')}</td>
       <td style="${td}">${esc_(x.cliente || '—')}</td>
       <td style="${td}">${esc_(d.modelo || '—')}<br><span style="color:#777;font-size:12px">${esc_(d.serial ? 'S/N ' + d.serial : '')}</span></td>
-      <td style="${td}white-space:nowrap">${it.link ? `<a href="${it.link}" style="color:${azul};font-weight:bold;text-decoration:none">Ver ficha&nbsp;›</a>` : ''}</td>
+      <td style="${td}white-space:nowrap">${it.link ? `<a href="${it.link}" style="color:${azul};font-weight:bold;text-decoration:none">${T_('Ver ficha', 'View record')}&nbsp;›</a>` : ''}</td>
     </tr>`;
   }).join('');
   const th = `padding:9px 10px;font-size:12px;color:#ffffff;text-align:left;font-weight:bold;letter-spacing:.3px;background:#3a393a;`;
 
   const resumo = [
-    ['Equipamentos registados', String(n)],
-    ['Data de emissão', quando],
-    clientes.length ? ['Cliente / Obra', clientes.join(', ')] : null,
-    tecnicos.length ? ['Técnico responsável', tecnicos.join(', ')] : null,
+    [T_('Equipamentos registados', 'Units registered'), String(n)],
+    [T_('Data de emissão', 'Issue date'), quando],
+    clientes.length ? [T_('Cliente / Obra', 'Customer / Site'), clientes.join(', ')] : null,
+    tecnicos.length ? [T_('Técnico responsável', 'Technician'), tecnicos.join(', ')] : null,
   ].filter(Boolean).map(([k, v]) => `<tr>
       <td style="padding:4px 14px 4px 0;font-size:13px;color:#666;white-space:nowrap">${esc_(k)}</td>
       <td style="padding:4px 0;font-size:13px;color:#222;font-weight:bold">${esc_(v)}</td></tr>`).join('');
@@ -753,51 +773,57 @@ function corpoEmail_(itens, quando) {
       <td align="left" style="vertical-align:middle"><img src="cid:logoCablotec" alt="Cablotec" height="44" style="display:block;height:44px;border:0"></td>
       <td align="right" style="vertical-align:middle;font-size:11px;color:#888">
         <table role="presentation" cellpadding="0" cellspacing="0" align="right"><tr>
-          <td style="font-size:11px;color:#888;padding-right:8px;vertical-align:middle">Preparado para</td>
+          <td style="font-size:11px;color:#888;padding-right:8px;vertical-align:middle">${T_('Preparado para', 'Prepared for')}</td>
           <td style="vertical-align:middle"><img src="cid:logoCliente" alt="${esc_(CONFIG.CLIENTE_NOME || '')}" height="34" style="display:block;height:34px;border:0"></td>
         </tr></table></td>
     </tr></table></td></tr>` : ''}
   <tr><td style="background:#3a393a;padding:18px 28px">
-    <div style="font-size:20px;font-weight:bold;color:#ffffff">Relatório de Registo de Equipamentos</div>
-    <div style="font-size:13px;color:#d6d6d6;margin-top:4px">Placas de características e números de série</div>
+    <div style="font-size:20px;font-weight:bold;color:#ffffff">${T_('Relatório de Registo de Equipamentos', 'Equipment Registration Report')}</div>
+    <div style="font-size:13px;color:#d6d6d6;margin-top:4px">${T_('Placas de características e números de série', 'Rating plates and serial numbers')}</div>
   </td></tr>
   <tr><td style="padding:26px 28px 6px">
-    <p style="margin:0 0 14px;font-size:14px;color:#222">Exmos. Senhores,</p>
+    <p style="margin:0 0 14px;font-size:14px;color:#222">${T_('Exmos. Senhores,', 'Dear Sir or Madam,')}</p>
     <p style="margin:0 0 14px;font-size:14px;color:#222;line-height:1.55">
-      Vimos por este meio remeter o relatório de registo de ${n === 1 ? 'um equipamento' : n + ' equipamentos'},
-      com a identificação do número de série, a informação do grupo e os dados constantes das respetivas placas de características.</p>
+      ${T_(`Vimos por este meio remeter o relatório de registo de ${n === 1 ? 'um equipamento' : n + ' equipamentos'},
+      com a identificação do número de série, a informação do grupo e os dados constantes das respetivas placas de características.`,
+      `Please find enclosed the registration report for ${n === 1 ? 'one unit' : n + ' units'},
+      including the serial number, group information and the data shown on the respective rating plates.`)}</p>
     <p style="margin:0 0 18px;font-size:14px;color:#222;line-height:1.55">
-      Segue em anexo o documento em formato PDF, que inclui, para cada equipamento, as fotografias das etiquetas,
-      a transcrição dos dados técnicos e um código de rastreio único para consulta e arquivo.</p>
+      ${T_(`Segue em anexo o documento em formato PDF, que inclui, para cada equipamento, as fotografias das etiquetas,
+      a transcrição dos dados técnicos e um código de rastreio único para consulta e arquivo.`,
+      `The attached PDF document includes, for each unit, photographs of the labels,
+      a transcription of the technical data and a unique tracking code for reference and filing.`)}</p>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px;border-left:3px solid ${azul};padding-left:12px">${resumo}</table>
   </td></tr>
   <tr><td style="padding:0 28px">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e3e6ee">
-      <tr><th style="${th}">Código de rastreio</th><th style="${th}">Serial</th><th style="${th}">Grupo</th>
-          <th style="${th}">Cliente / Obra</th><th style="${th}">Modelo</th><th style="${th}"></th></tr>
+      <tr><th style="${th}">${T_('Código de rastreio', 'Tracking code')}</th><th style="${th}">Serial</th><th style="${th}">${T_('Grupo', 'Group')}</th>
+          <th style="${th}">${T_('Cliente / Obra', 'Customer / Site')}</th><th style="${th}">${T_('Modelo', 'Model')}</th><th style="${th}"></th></tr>
       ${linhas}
     </table>
   </td></tr>
   <tr><td style="padding:20px 28px 4px">
     <p style="margin:0 0 12px;font-size:13px;color:#444;line-height:1.55">
-      A ficha de cada equipamento pode ser consultada através da ligação “Ver ficha” ou lendo o código QR impresso no relatório.
-      ${folha ? `O histórico completo de registos está disponível na <a href="${folha}" style="color:${azul}">folha de registo</a>.` : ''}</p>
+      ${T_('A ficha de cada equipamento pode ser consultada através da ligação “Ver ficha” ou lendo o código QR impresso no relatório.',
+           'Each unit’s record can be viewed via the “View record” link or by scanning the QR code printed on the report.')}
+      ${folha ? T_(`O histórico completo de registos está disponível na <a href="${folha}" style="color:${azul}">folha de registo</a>.`,
+                   `The full registration history is available in the <a href="${folha}" style="color:${azul}">register sheet</a>.`) : ''}</p>
     <p style="margin:0 0 22px;font-size:14px;color:#222;line-height:1.55">
-      Ficamos ao dispor para qualquer esclarecimento adicional.</p>
-    <p style="margin:0 0 4px;font-size:14px;color:#222">Com os melhores cumprimentos,</p>
+      ${T_('Ficamos ao dispor para qualquer esclarecimento adicional.', 'Please do not hesitate to contact us should you require any further information.')}</p>
+    <p style="margin:0 0 4px;font-size:14px;color:#222">${T_('Com os melhores cumprimentos,', 'Kind regards,')}</p>
   </td></tr>
   <tr><td style="padding:10px 28px 26px">
     <table role="presentation" cellpadding="0" cellspacing="0"><tr>
       <td style="border-left:4px solid ${azul};padding:4px 0 4px 12px">
-        <div style="font-size:15px;font-weight:bold;color:${azul}">Aplicação Cablotec</div>
-        <div style="font-size:13px;color:#555">Geração de Etiquetas e Registo de Equipamentos</div>
+        <div style="font-size:15px;font-weight:bold;color:${azul}">${T_('Aplicação Cablotec', 'Cablotec Application')}</div>
+        <div style="font-size:13px;color:#555">${T_('Geração de Etiquetas e Registo de Equipamentos', 'Label Generation and Equipment Registration')}</div>
         <div style="font-size:12px;color:#888;margin-top:2px">Cablotec – Cablagens e Sistemas, Lda</div>
       </td></tr></table>
   </td></tr>
   <tr><td style="background:#f4f6fa;padding:14px 28px;border-top:1px solid #e3e6ee">
     <p style="margin:0;font-size:11px;color:#888;line-height:1.5">
-      Esta mensagem foi gerada automaticamente pela Aplicação Cablotec – Geração de Etiquetas.
-      O documento anexo contém informação técnica destinada exclusivamente aos destinatários indicados.</p>
+      ${T_('Esta mensagem foi gerada automaticamente pela Aplicação Cablotec – Geração de Etiquetas. O documento anexo contém informação técnica destinada exclusivamente aos destinatários indicados.',
+           'This message was generated automatically by the Cablotec Application – Label Generation. The attached document contains technical information intended solely for the named recipients.')}</p>
   </td></tr>
 </table>
 </td></tr></table></body></html>`;
@@ -809,9 +835,27 @@ function textoEmail_(itens, quando) {
     const d = it.dados || {}, x = it.extras || {};
     let cod = '';
     try { cod = codigoRastreio_(it.pasta, it.registadoEm); } catch (e) {}
-    return `• ${cod} | Serial ${it.serial} | Grupo ${it.grupo || '—'}` + (x.cliente ? ` | ${x.cliente}` : '') +
-           (d.modelo ? ` | ${d.modelo}` : '') + (it.link ? `\n  Ficha: ${it.link}` : '');
+    return `• ${cod} | Serial ${it.serial} | ${T_('Grupo', 'Group')} ${it.grupo || '—'}` + (x.cliente ? ` | ${x.cliente}` : '') +
+           (d.modelo ? ` | ${d.modelo}` : '') + (it.link ? `\n  ${T_('Ficha', 'Record')}: ${it.link}` : '');
   }).join('\n');
+  if (IDIOMA_ === 'en') return `Dear Sir or Madam,
+
+Please find enclosed the registration report for ${itens.length} unit(s), issued on ${quando}, including the serial number, group information and the data shown on the respective rating plates.
+
+The attached PDF document includes photographs of the labels, a transcription of the technical data and a unique tracking code for each unit.
+
+${linhas}
+
+Please do not hesitate to contact us should you require any further information.
+
+Kind regards,
+
+Cablotec Application
+Label Generation and Equipment Registration
+Cablotec – Cablagens e Sistemas, Lda
+
+—
+This message was generated automatically by the Cablotec Application – Label Generation.`;
   return `Exmos. Senhores,
 
 Vimos por este meio remeter o relatório de registo de ${itens.length} equipamento(s), emitido em ${quando}, com a identificação do número de série, a informação do grupo e os dados constantes das respetivas placas de características.
@@ -893,11 +937,12 @@ function doGet(e) {
 
   // Fotos: lidas pelo script (corre como o dono), por isso a pasta não precisa de ser pública
   const fotos = [];
-  let fichaUrl = '';
+  let fichaUrl = '', assinaturaF = null;
   const files = pasta.getFiles();
   while (files.hasNext()) {
     const f = files.next();
-    if (f.getMimeType().indexOf('image/') === 0) fotos.push(f);
+    if (/^assinatura/i.test(f.getName())) assinaturaF = f;
+    else if (f.getMimeType().indexOf('image/') === 0) fotos.push(f);
     else if (/^Ficha_.*\.pdf$/.test(f.getName())) fichaUrl = f.getUrl();
   }
   fotos.sort((a, b) => a.getName().localeCompare(b.getName()));
@@ -919,7 +964,10 @@ function doGet(e) {
       <div class="rotulo">INFORMAÇÃO DO GRUPO</div>
       <div class="grupo">${esc_(info.grupo || '—')}</div>
     </div>
-    ${extrasHtml_(info.extras)}
+    ${extrasHtml_(info.extras, info.dados, info.campos)}
+    ${assinaturaF ? `<div class="card"><div class="rotulo">ASSINATURA</div>
+       <img src="data:image/png;base64,${Utilities.base64Encode(assinaturaF.getBlob().getBytes())}" style="background:#fff;border:1px solid #eee">
+       <p style="margin:6px 0 0;font-size:14px">${esc_(((info.extras || {}).assinadoPor) || '')}</p></div>` : ''}
     ${linhas ? `<div class="card"><div class="rotulo">DADOS DA ETIQUETA</div><table>${linhas}</table></div>` : ''}
     <div class="card">
       <div class="rotulo">FOTOS (${fotos.length}) <small>· toque para ampliar</small></div>
@@ -1001,11 +1049,14 @@ function testarPagina() {
 
 /* ===================== FORMULÁRIO NO TELEMÓVEL ===================== */
 
+/** Confirma o PIN. Devolve { nome, admin }: o CODIGO_ACESSO é o administrador; os técnicos têm PIN próprio. */
 function verificarPin_(pin) {
-  if (!CONFIG.CODIGO_ACESSO || String(pin) !== String(CONFIG.CODIGO_ACESSO)) {
-    Utilities.sleep(1500); // trava tentativas repetidas
-    throw new Error('Código de acesso errado.');
-  }
+  pin = String(pin == null ? '' : pin).trim();
+  if (CONFIG.CODIGO_ACESSO && pin === String(CONFIG.CODIGO_ACESSO)) return { nome: '', admin: true };
+  const t = pin ? tecnicoPorPin_(pin) : null;
+  if (t && t.ativo) return { nome: t.nome, admin: false };
+  Utilities.sleep(1500); // trava tentativas repetidas
+  throw new Error(t ? 'Este acesso foi desativado. Fale com o responsável.' : 'Código de acesso errado.');
 }
 
 /** Chamado pelo formulário: cria (ou reutiliza) a pasta "SERIAL - GRUPO". */
@@ -1035,34 +1086,37 @@ function formCriarPasta(pin, serial, grupo) {
 /** Chamado pelo formulário: guarda uma foto (base64 JPEG, já reduzida no telemóvel). */
 function formEnviarFoto(pin, pastaId, base64, slot) {
   verificarPin_(pin);
-  slot = Number(slot);
-  if (slot !== 1 && slot !== 2) throw new Error('Foto inválida.');
+  const assin = slot === 'assinatura';
+  slot = assin ? 9 : Number(slot);
+  if ([1, 2, 3, 9].indexOf(slot) < 0) throw new Error('Foto inválida.');
   const pasta = DriveApp.getFolderById(pastaId);
   if (!pastaPertenceAoRelatorio_(pasta)) throw new Error('Pasta inválida.');
   // Substitui a foto anterior desse lugar (se o serial for registado de novo)
   const files = pasta.getFiles();
   while (files.hasNext()) {
     const f = files.next();
-    if (new RegExp('^foto' + slot + '[_.\\s-]', 'i').test(f.getName())) f.setTrashed(true);
+    if ((assin ? /^assinatura/i : new RegExp('^foto' + slot + '[_.\\s-]', 'i')).test(f.getName())) f.setTrashed(true);
   }
   const ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
-  const nome = slot === 1 ? `foto1_etiqueta_grande_${ts}.jpg` : `foto2_etiqueta_pequena_${ts}.jpg`;
-  pasta.createFile(Utilities.newBlob(Utilities.base64Decode(base64), 'image/jpeg', nome));
+  const nome = { 1: `foto1_etiqueta_grande_${ts}.jpg`, 2: `foto2_etiqueta_pequena_${ts}.jpg`,
+                 3: `foto3_equipamento_${ts}.jpg`, 9: `assinatura_${ts}.png` }[slot];
+  pasta.createFile(Utilities.newBlob(Utilities.base64Decode(base64), assin ? 'image/png' : 'image/jpeg', nome));
   return true;
 }
 
 /** Chamado no fim: OCR (opcional), guarda os dados e devolve o link da ficha. */
 function formFinalizar(pin, pastaId, extras, codigos) {
-  verificarPin_(pin);
+  const user = verificarPin_(pin);
   const pasta = DriveApp.getFolderById(pastaId);
   if (!pastaPertenceAoRelatorio_(pasta)) throw new Error('Pasta inválida.');
   const partes = pasta.getName().split(/\s*[-–_]\s*/);
   const item = { pasta, serial: partes.shift(), grupo: partes.join(' '), dados: {}, campos: [],
                  extras: limparExtras_(extras), codigos: limparCodigos_(codigos) };
+  if (user && !user.admin) item.extras.tecnico = user.nome;   // o nome vem do PIN do técnico
 
   const fotos = [];
   const files = pasta.getFiles();
-  while (files.hasNext()) { const f = files.next(); if (f.getMimeType().indexOf('image/') === 0) fotos.push(f); }
+  while (files.hasNext()) { const f = files.next(); if (f.getMimeType().indexOf('image/') === 0 && !fotoExtra_(f)) fotos.push(f); }
   if (CONFIG.USAR_OCR && CONFIG.OCR_AO_REGISTAR) {
     try {
       const r = analisarEtiquetas_(fotos);
@@ -1109,12 +1163,18 @@ function doPost(e) {
     const pin = req.pin;
     let data;
     switch (req.acao) {
-      case 'ping':            verificarPin_(pin); data = { titulo: CONFIG.TITULO_PAGINA }; break;
+      case 'ping':            { const u = verificarPin_(pin); data = { titulo: CONFIG.TITULO_PAGINA, nome: u.nome, admin: u.admin }; } break;
       case 'criarPasta':      data = formCriarPasta(pin, req.serial, req.grupo); break;
       case 'enviarFoto':      data = formEnviarFoto(pin, req.pastaId, req.base64, req.slot); break;
       case 'finalizar':       data = formFinalizar(pin, req.pastaId, req.extras, req.codigos); break;
       case 'enviarRelatorio': verificarPin_(pin);
-                              data = { enviados: enviarRelatorioPara_(req.ids, validarEmails_(req.emails)), paginas: ultimoEnvio_.paginas }; break;
+                              data = { enviados: enviarRelatorioPara_(req.ids, validarEmails_(req.emails), req.idioma),
+                                       paginas: ultimoEnvio_.paginas }; break;
+      case 'estatisticas':    verificarPin_(pin); data = apiEstatisticas_(); break;
+      case 'relatorioMensal': soAdmin_(pin); data = relatorioMensal_(validarEmails_(req.emails), req.mes); break;
+      case 'tecnicos':        soAdmin_(pin); data = apiTecnicos_(); break;
+      case 'tecnicoGuardar':  soAdmin_(pin); data = apiTecnicoGuardar_(req.nome, req.novoPin, req.ativo, req.id); break;
+      case 'tecnicoRemover':  soAdmin_(pin); data = apiTecnicoRemover_(req.id); break;
       case 'listar':          data = apiListar_(pin); break;
       case 'verificar':       verificarPin_(pin); data = apiVerificar_(req.serial); break;
       case 'pesquisar':       verificarPin_(pin); data = apiPesquisar_(req.q); break;
@@ -1147,7 +1207,8 @@ function apiListar_(pin) {
     return {
       serial: info.serial || partes[0], grupo: info.grupo || partes.slice(1).join(' '),
       modelo: (info.dados || {}).modelo || '', fotos, id: pasta.getId(),
-      cliente: (info.extras || {}).cliente || '', fonte: info.fonte || '', corrigido: !!info.corrigido,
+      cliente: (info.extras || {}).cliente || '', tecnico: (info.extras || {}).tecnico || '',
+      fonte: info.fonte || '', corrigido: !!info.corrigido,
       data: Utilities.formatDate(pasta.getLastUpdated(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm'),
       link: webApp + '?id=' + pasta.getId(), _t: pasta.getLastUpdated().getTime(),
     };
@@ -1162,7 +1223,7 @@ function apiListar_(pin) {
       const todas = [];
       while (env.hasNext()) todas.push(env.next());
       todas.sort((a, b) => b.getLastUpdated() - a.getLastUpdated());
-      todas.slice(0, 30).forEach(p => enviados.push(ler(p)));
+      todas.slice(0, 100).forEach(p => enviados.push(ler(p)));
     } else if (!pastaDeSistema_(f.getName())) {
       porEnviar.push(ler(f));
     }
@@ -1170,5 +1231,6 @@ function apiListar_(pin) {
   porEnviar.sort((a, b) => b._t - a._t);
   let folha = '';
   try { folha = folha_(); } catch (e) { Logger.log('Folha: ' + e.message); }
+  try { garantirAgendamentoMensal_(); } catch (e) { Logger.log('Agendamento mensal: ' + e.message); }
   return { porEnviar, enviados, folha, emailPadrao: CONFIG.EMAIL_DESTINO };
 }
