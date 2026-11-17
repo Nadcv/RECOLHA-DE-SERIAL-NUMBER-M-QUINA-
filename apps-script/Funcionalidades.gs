@@ -355,6 +355,13 @@ function apiEtiquetasQR_(ids) {
     const cell = t.getCell(r, c).setWidth(179).setPaddingTop(8).setPaddingBottom(8)
                   .setVerticalAlignment(DocumentApp.VerticalAlignment.CENTER);
     const p = cell.getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    if (CONFIG.LOGOTIPOS) {
+      try {
+        const lg = p.appendInlineImage(logoBlob_('cablotec'));
+        lg.setHeight(18).setWidth(Math.round(18 * lg.getWidth() / lg.getHeight()));
+        p.appendText('\n');
+      } catch (e) {}
+    }
     try {
       const qr = UrlFetchApp.fetch('https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=4&data=' +
                                    encodeURIComponent(it.link)).getBlob();

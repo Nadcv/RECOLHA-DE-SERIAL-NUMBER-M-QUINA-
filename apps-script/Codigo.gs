@@ -75,14 +75,18 @@ const CONFIG = {
   GUARDAR_FICHA_NA_PASTA: true,             // guarda "Ficha_<serial>.pdf" dentro da pasta do serial
   // Molduras da folha (pontos; A4 útil ≈ 515 x 770)
   FOLHA_DADOS: true,
+  LOGOTIPOS: true,                          // logótipo Cablotec (emissor) e do cliente no PDF, email e ficha
+  CLIENTE_NOME: 'Aralab',                   // cliente principal (aparece como "Cliente" com o logótipo)
   GEMINI_API_KEY: '',                       // chave grátis em aistudio.google.com: lê TUDO das etiquetas com IA
   GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash-lite e, se falhar, flash)
   GEMINI_MAX_DIA: 200,                      // máximo de leituras por IA por dia (o resto usa OCR)                        // 2.ª folha com os dados lidos nas fotos
-  MOLDURA1: { largura: 400, altura: 265 },  // Foto 1 – etiqueta grande (placa de características)
-  MOLDURA2: { largura: 515, altura: 185 },  // Foto 2 – etiqueta pequena (código de barras)
+  MOLDURA1: { largura: 400, altura: 240 },  // Foto 1 – etiqueta grande (placa de características)
+  MOLDURA2: { largura: 515, altura: 165 },  // Foto 2 – etiqueta pequena (código de barras)
 };
 
 /* ===================== FUNÇÃO PRINCIPAL ===================== */
+
+let ultimoEnvio_ = {};
 
 function enviarRelatorio() {
   return enviarRelatorioPara_();
@@ -143,6 +147,8 @@ function enviarRelatorio__(ids, emails) {
   // 2) Converter para PDF
   const docFile = DriveApp.getFileById(doc.getId());
   const pdf = docFile.getAs(MimeType.PDF).setName(nome + '.pdf');
+  const paginas = (pdf.getDataAsString('ISO-8859-1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+  if (paginas > itens.length * (CONFIG.FOLHA_DADOS ? 2 : 1)) Logger.log('Aviso: o PDF tem ' + paginas + ' páginas.');
 
   // 3) Enviar email
   const quandoTxt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy 'às' HH:mm");
@@ -154,6 +160,7 @@ function enviarRelatorio__(ids, emails) {
     htmlBody: corpoEmail_(itens, quandoTxt),
     body: textoEmail_(itens, quandoTxt),
     attachments: [pdf],
+    inlineImages: CONFIG.LOGOTIPOS ? { logoCablotec: logoBlob_('cablotec'), logoCliente: logoBlob_('aralab') } : {},
   });
 
   // 4) Ficha individual dentro da pasta de cada serial (é o que o QR abre)
@@ -172,7 +179,8 @@ function enviarRelatorio__(ids, emails) {
   });
   try { registarVarios_(itens.map(it => [it.pasta, 'Enviado'])); } catch (e) { Logger.log('Folha: ' + e.message); }
 
-  Logger.log(`Enviado: ${itens.length} serial(is) para ${para}`);
+  Logger.log(`Enviado: ${itens.length} serial(is) para ${para} (${paginas} páginas)`);
+  ultimoEnvio_ = { paginas };
   return itens.length;
 }
 
@@ -220,20 +228,23 @@ function escolherFotos_(fotos) {
 function montarPagina_(body, item) {
   if (!item.foto1 && item.fotos) [item.foto1, item.foto2] = escolherFotos_(item.fotos);
 
+  // 0) Logótipos: Cablotec (emissor) à esquerda, cliente à direita
+  cabecalhoLogos_(body);
+
   // 1) SERIAL NO (caixa à esquerda) + QR code à direita
   const l1 = tabelaInvisivel_(body, [300, 215]);
-  caixaTexto_(l1[0], [['SERIAL NO: ', 15, '#000000'], [item.serial, 22, '#1a3d8f']]);
+  caixaTexto_(l1[0], [['SERIAL NO: ', 15, '#000000'], [item.serial, 22, '#c9272e']]);
   if (item.qr) {
     const pq = l1[1].getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
     pq.appendInlineImage(item.qr.copyBlob()).setWidth(80).setHeight(80);
     const pl = l1[1].appendParagraph('Ver ficha').setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
     pl.editAsText().setFontSize(7).setForegroundColor('#666666').setLinkUrl(item.link);
   }
-  espaco_(body, 14);
+  espaco_(body, 8);
 
   // 2) INFORMAÇÃO DO GRUPO (caixa ao centro-direita)
   const l2 = tabelaInvisivel_(body, [170, 345]);
-  caixaTexto_(l2[1], [['INFORMAÇÃO DO GRUPO: ', 11, '#000000'], [item.grupo || '—', 15, '#1a3d8f']]);
+  caixaTexto_(l2[1], [['INFORMAÇÃO DO GRUPO: ', 11, '#000000'], [item.grupo || '—', 15, '#c9272e']]);
 
   // 3) Seta
   const seta = body.appendParagraph('⇩').setAlignment(DocumentApp.HorizontalAlignment.CENTER);
@@ -245,7 +256,7 @@ function montarPagina_(body, item) {
   const lado = Math.round((515 - m.largura) / 2);
   const l3 = tabelaInvisivel_(body, [lado, m.largura, lado]);
   moldura_(l3[1], item.foto1, m, 'Foto 1 – etiqueta grande');
-  espaco_(body, 18);
+  espaco_(body, 12);
 
   // 5) Moldura 2 – etiqueta pequena (largura toda)
   moldura_(body, item.foto2, CONFIG.MOLDURA2, 'Foto 2 – etiqueta pequena');
@@ -267,6 +278,7 @@ const CAMPOS_ETIQUETA_ = [
 /** Folha 2: tabela com o que foi lido nas fotos (OCR) + o texto completo. */
 function montarFolhaDados_(body, item) {
   const d = item.dados || {};
+  cabecalhoLogos_(body);
   const titulo = body.appendParagraph('DADOS LIDOS DAS ETIQUETAS');
   titulo.editAsText().setBold(true).setFontSize(15).setForegroundColor('#000000');
   titulo.setSpacingBefore(0).setSpacingAfter(4);
@@ -289,7 +301,7 @@ function montarFolhaDados_(body, item) {
     [c0, c1].forEach(c => c.setPaddingTop(5).setPaddingBottom(5).setPaddingLeft(8));
     c0.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
     const vazio = linhas[r][1] === '—';
-    c1.editAsText().setBold(!vazio).setFontSize(11).setForegroundColor(vazio ? '#aaaaaa' : '#1a3d8f');
+    c1.editAsText().setBold(!vazio).setFontSize(11).setForegroundColor(vazio ? '#aaaaaa' : '#c9272e');
   }
 
   if (x.obs) {
@@ -314,8 +326,26 @@ function montarFolhaDados_(body, item) {
     const r = body.appendParagraph('Código de rastreio: ');
     r.setSpacingBefore(18);
     r.editAsText().setBold(false).setFontSize(9).setForegroundColor('#555555').setFontFamily('Arial');
-    r.appendText(cod).setBold(true).setFontSize(11).setForegroundColor('#1a3d8f').setFontFamily('Courier New');
+    r.appendText(cod).setBold(true).setFontSize(11).setForegroundColor('#c9272e').setFontFamily('Courier New');
   }
+}
+
+/** Linha de topo do PDF com os dois logótipos e um traço vermelho por baixo. */
+function cabecalhoLogos_(body) {
+  if (!CONFIG.LOGOTIPOS) return;
+  try {
+    const c = tabelaInvisivel_(body, [300, 215]);
+    const pe = c[0].getChild(0).asParagraph();
+    const le = pe.appendInlineImage(logoBlob_('cablotec'));
+    le.setHeight(30).setWidth(Math.round(30 * le.getWidth() / le.getHeight()));
+    const pd = c[1].getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+    pd.appendText('Cliente  ').setFontSize(7).setForegroundColor('#888888').setBold(false);
+    const ld = pd.appendInlineImage(logoBlob_('aralab'));
+    ld.setHeight(24).setWidth(Math.round(24 * ld.getWidth() / ld.getHeight()));
+    const linha = body.appendParagraph('').setSpacingBefore(2).setSpacingAfter(6);
+    linha.appendHorizontalRule();
+    linha.editAsText().setFontSize(2);
+  } catch (e) { Logger.log('Logótipos: ' + e.message); }
 }
 
 /** Tabela sem bordas, só para posicionar as caixas. Devolve as células. */
@@ -672,7 +702,7 @@ function camposDoOCR_(t, dados) {
 /** Email formal (HTML com estilos em linha, compatível com Outlook e Gmail). */
 function corpoEmail_(itens, quando) {
   const n = itens.length;
-  const azul = '#1a3d8f';
+  const azul = '#c9272e';
   const unicos = (f) => itens.map(f).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
   const clientes = unicos(it => (it.extras || {}).cliente);
   const tecnicos = unicos(it => (it.extras || {}).tecnico);
@@ -694,7 +724,7 @@ function corpoEmail_(itens, quando) {
       <td style="${td}white-space:nowrap">${it.link ? `<a href="${it.link}" style="color:${azul};font-weight:bold;text-decoration:none">Ver ficha&nbsp;›</a>` : ''}</td>
     </tr>`;
   }).join('');
-  const th = `padding:9px 10px;font-size:12px;color:#ffffff;text-align:left;font-weight:bold;letter-spacing:.3px;background:${azul};`;
+  const th = `padding:9px 10px;font-size:12px;color:#ffffff;text-align:left;font-weight:bold;letter-spacing:.3px;background:#3a393a;`;
 
   const resumo = [
     ['Equipamentos registados', String(n)],
@@ -709,9 +739,18 @@ function corpoEmail_(itens, quando) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:24px 0">
 <tr><td align="center">
 <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;font-family:Arial,Helvetica,sans-serif">
-  <tr><td style="background:${azul};padding:22px 28px">
+  ${CONFIG.LOGOTIPOS ? `<tr><td style="padding:18px 28px 14px;border-bottom:4px solid ${azul}">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td align="left" style="vertical-align:middle"><img src="cid:logoCablotec" alt="Cablotec" height="44" style="display:block;height:44px;border:0"></td>
+      <td align="right" style="vertical-align:middle;font-size:11px;color:#888">
+        <table role="presentation" cellpadding="0" cellspacing="0" align="right"><tr>
+          <td style="font-size:11px;color:#888;padding-right:8px;vertical-align:middle">Preparado para</td>
+          <td style="vertical-align:middle"><img src="cid:logoCliente" alt="${esc_(CONFIG.CLIENTE_NOME || '')}" height="34" style="display:block;height:34px;border:0"></td>
+        </tr></table></td>
+    </tr></table></td></tr>` : ''}
+  <tr><td style="background:#3a393a;padding:18px 28px">
     <div style="font-size:20px;font-weight:bold;color:#ffffff">Relatório de Registo de Equipamentos</div>
-    <div style="font-size:13px;color:#c9d4ee;margin-top:4px">Placas de características e números de série</div>
+    <div style="font-size:13px;color:#d6d6d6;margin-top:4px">Placas de características e números de série</div>
   </td></tr>
   <tr><td style="padding:26px 28px 6px">
     <p style="margin:0 0 14px;font-size:14px;color:#222">Exmos. Senhores,</p>
@@ -743,6 +782,7 @@ function corpoEmail_(itens, quando) {
       <td style="border-left:4px solid ${azul};padding:4px 0 4px 12px">
         <div style="font-size:15px;font-weight:bold;color:${azul}">Aplicação Cablotec</div>
         <div style="font-size:13px;color:#555">Geração de Etiquetas e Registo de Equipamentos</div>
+        <div style="font-size:12px;color:#888;margin-top:2px">Cablotec – Cablagens e Sistemas, Lda</div>
       </td></tr></table>
   </td></tr>
   <tr><td style="background:#f4f6fa;padding:14px 28px;border-top:1px solid #e3e6ee">
@@ -777,6 +817,7 @@ Com os melhores cumprimentos,
 
 Aplicação Cablotec
 Geração de Etiquetas e Registo de Equipamentos
+Cablotec – Cablagens e Sistemas, Lda
 
 —
 Mensagem gerada automaticamente pela Aplicação Cablotec – Geração de Etiquetas.`;
@@ -858,6 +899,8 @@ function doGet(e) {
   }).join('');
 
   const html = `
+    ${CONFIG.LOGOTIPOS ? `<div class="marcas"><img src="${logoDataUri_('cablotec')}" alt="Cablotec">
+      <span><small>Cliente</small><img src="${logoDataUri_('aralab')}" alt="${esc_(CONFIG.CLIENTE_NOME || '')}"></span></div>` : ''}
     <header>${esc_(CONFIG.TITULO_PAGINA)}</header>
     <div class="card destaque">
       <div class="rotulo">SERIAL NO</div>
@@ -876,7 +919,7 @@ function doGet(e) {
     ${fichaUrl ? `<a class="botao" href="${fichaUrl}" target="_blank">📄 Ficha em PDF</a>` : ''}
     <a class="botao sec" href="${pasta.getUrl()}" target="_blank">📁 Abrir pasta no Drive</a>
     <div class="card"><div class="rotulo">CÓDIGO DE RASTREIO</div>
-      <div style="font-family:monospace;font-size:20px;font-weight:700;color:#1a3d8f">${esc_(codigoRastreio_(pasta, info.registadoEm))}</div></div>
+      <div style="font-family:monospace;font-size:20px;font-weight:700;color:#c9272e">${esc_(codigoRastreio_(pasta, info.registadoEm))}</div></div>
     <footer>${info.registadoEm || info.enviadoEm ? 'Registado em ' + esc_(info.registadoEm || info.enviadoEm) : ''}
             ${info.enviadoEm && info.registadoEm ? ' · Enviado em ' + esc_(info.enviadoEm) : ''}</footer>`;
   return paginaHtml_(html, 'Serial ' + info.serial);
@@ -885,11 +928,15 @@ function doGet(e) {
 function paginaHtml_(conteudo, titulo) {
   const css = `
     *{box-sizing:border-box} body{margin:0;font-family:-apple-system,Roboto,Arial,sans-serif;background:#f1f3f6;color:#222}
-    header{background:#1a3d8f;color:#fff;padding:16px;font-size:18px;font-weight:600;text-align:center}
+    header{background:#3a393a;color:#fff;padding:14px;font-size:17px;font-weight:600;text-align:center;border-top:4px solid #c9272e}
+    .marcas{display:flex;align-items:center;justify-content:space-between;background:#fff;padding:12px 16px}
+    .marcas img{height:34px;width:auto;display:block;margin:0;border-radius:0}
+    .marcas span{display:flex;align-items:center;gap:8px} .marcas small{color:#888;font-size:11px}
+    .marcas span img{height:26px}
     .card{background:#fff;margin:12px;padding:14px 16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.12)}
     .destaque{border:2px solid #000}
     .rotulo{font-size:12px;font-weight:700;color:#666;letter-spacing:.5px;margin-bottom:6px}
-    .serial{font-size:38px;font-weight:800;color:#1a3d8f}
+    .serial{font-size:38px;font-weight:800;color:#c9272e}
     .grupo{font-size:26px;font-weight:700}
     table{width:100%;border-collapse:collapse;font-size:15px}
     th{text-align:left;color:#555;font-weight:600;padding:7px 8px 7px 0;width:42%;vertical-align:top}
@@ -897,8 +944,8 @@ function paginaHtml_(conteudo, titulo) {
     tr+tr th,tr+tr td{border-top:1px solid #eee}
     img{width:100%;border-radius:8px;margin-top:8px;display:block}
     img.zoom{position:fixed;inset:0;margin:0;width:100vw;height:100vh;object-fit:contain;background:#000;z-index:9;border-radius:0}
-    .botao{display:block;margin:12px;padding:14px;text-align:center;border-radius:10px;background:#1a3d8f;color:#fff;text-decoration:none;font-weight:600}
-    .botao.sec{background:#fff;color:#1a3d8f;border:1px solid #1a3d8f}
+    .botao{display:block;margin:12px;padding:14px;text-align:center;border-radius:10px;background:#c9272e;color:#fff;text-decoration:none;font-weight:600}
+    .botao.sec{background:#fff;color:#c9272e;border:1px solid #c9272e}
     footer{text-align:center;color:#888;font-size:12px;padding:8px 0 24px}`;
   return HtmlService.createHtmlOutput(`<style>${css}</style>${conteudo}`)
     .setTitle(titulo || CONFIG.TITULO_PAGINA)
@@ -1058,7 +1105,7 @@ function doPost(e) {
       case 'enviarFoto':      data = formEnviarFoto(pin, req.pastaId, req.base64, req.slot); break;
       case 'finalizar':       data = formFinalizar(pin, req.pastaId, req.extras, req.codigos); break;
       case 'enviarRelatorio': verificarPin_(pin);
-                              data = { enviados: enviarRelatorioPara_(req.ids, validarEmails_(req.emails)) }; break;
+                              data = { enviados: enviarRelatorioPara_(req.ids, validarEmails_(req.emails)), paginas: ultimoEnvio_.paginas }; break;
       case 'listar':          data = apiListar_(pin); break;
       case 'verificar':       verificarPin_(pin); data = apiVerificar_(req.serial); break;
       case 'pesquisar':       verificarPin_(pin); data = apiPesquisar_(req.q); break;
