@@ -295,13 +295,22 @@ function montarFolhaDados_(body, item) {
     .concat(lidos.map(([n, v]) => [String(n), String(v || '—')]));
   const t = body.appendTable(linhas);
   t.setBorderWidth(1).setBorderColor('#999999');
-  for (let r = 0; r < t.getNumRows(); r++) {
+  // Com muitos campos a tabela fica mais compacta, para caber sempre numa folha
+  const n = t.getNumRows();
+  const [pad, fN, fV] = n <= 18 ? [5, 10, 11] : n <= 28 ? [2, 9, 10] : [1, 8, 9];
+  for (let r = 0; r < n; r++) {
     const c0 = t.getCell(r, 0).setWidth(190).setBackgroundColor('#f0f2f6');
     const c1 = t.getCell(r, 1);
-    [c0, c1].forEach(c => c.setPaddingTop(5).setPaddingBottom(5).setPaddingLeft(8));
-    c0.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
+    [c0, c1].forEach(c => {
+      c.setPaddingTop(pad).setPaddingBottom(pad).setPaddingLeft(8);
+      for (let i = 0; i < c.getNumChildren(); i++) {
+        const el = c.getChild(i);
+        if (el.getType() === DocumentApp.ElementType.PARAGRAPH) el.asParagraph().setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
+      }
+    });
+    c0.editAsText().setBold(true).setFontSize(fN).setForegroundColor('#333333');
     const vazio = linhas[r][1] === '—';
-    c1.editAsText().setBold(!vazio).setFontSize(11).setForegroundColor(vazio ? '#aaaaaa' : '#c9272e');
+    c1.editAsText().setBold(!vazio).setFontSize(fV).setForegroundColor(vazio ? '#aaaaaa' : '#c9272e');
   }
 
   if (x.obs) {
