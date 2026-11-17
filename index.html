@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a3d8f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Seriais">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>Registo de Seriais</title>
+<style>
+  :root { --azul:#1a3d8f; --fundo:#f1f3f6; --verde:#1b8a3a; --laranja:#d97706; --vermelho:#c62828; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; }
+  section { scroll-margin-bottom:90px; } .botao, input, .moldura { scroll-margin-bottom:90px; }
+  body { font-family:-apple-system,Roboto,Arial,sans-serif; background:var(--fundo); color:#222;
+         padding-bottom:calc(72px + env(safe-area-inset-bottom)); }
+  header { position:sticky; top:0; z-index:5; background:var(--azul); color:#fff;
+           padding:calc(14px + env(safe-area-inset-top)) 16px 14px; font-size:18px; font-weight:600;
+           display:flex; align-items:center; justify-content:space-between; }
+  #rede { font-size:12px; font-weight:600; padding:4px 10px; border-radius:20px; background:rgba(255,255,255,.18); }
+  #rede.off { background:var(--laranja); }
+  .ecra { display:none; } .ecra.ativo { display:block; }
+  .card { background:#fff; margin:12px; padding:14px 16px; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  .destaque { border:2px solid #000; }
+  label, .rotulo { display:block; font-size:12px; font-weight:700; color:#666; letter-spacing:.5px; margin-bottom:6px; }
+  label small { font-weight:400; letter-spacing:0; }
+  input { width:100%; font-size:18px; padding:12px; border:1px solid #ccc; border-radius:8px; background:#fff; }
+  input.grande { font-size:28px; font-weight:800; color:var(--azul); text-transform:uppercase; }
+  input.maius { text-transform:uppercase; }
+  .botao { display:block; width:calc(100% - 24px); margin:12px; padding:14px; text-align:center; border-radius:10px; border:0;
+           background:var(--azul); color:#fff; text-decoration:none; font-weight:600; font-size:16px; cursor:pointer; }
+  .botao.sec { background:#fff; color:var(--azul); border:1px solid var(--azul); }
+  .card .botao { width:100%; margin:12px 0 0; }
+  .botao:disabled { opacity:.5; }
+  .linha { display:flex; gap:10px; }
+  .linha .botao { flex:1; margin:0; font-size:15px; }
+  .seta { text-align:center; font-size:28px; color:#555; margin:-6px 0 -8px; }
+  .moldura { position:relative; border:2px dashed #bbb; border-radius:8px; margin-bottom:10px; display:flex;
+             align-items:center; justify-content:center; color:#aaa; font-size:14px; overflow:hidden; background:#fafafa; }
+  .moldura.m1 { aspect-ratio:400/280; } .moldura.m2 { aspect-ratio:515/200; }
+  .moldura.cheia { border:2px solid #000; background:#fff; }
+  .moldura img { width:100%; height:100%; object-fit:contain; display:block; }
+  .moldura b { position:absolute; top:6px; right:6px; background:rgba(0,0,0,.6); color:#fff; border-radius:50%;
+               width:30px; height:30px; text-align:center; line-height:30px; cursor:pointer; }
+  .dica { font-size:12px; color:#888; margin:10px 0 0; }
+  #estado { text-align:center; padding:6px 16px; font-weight:600; color:var(--azul); min-height:20px; }
+  #estado.erro { color:var(--vermelho); }
+  .serial { font-size:34px; font-weight:800; color:var(--azul); }
+  .grupo { font-size:22px; font-weight:700; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin-top:8px; }
+  th { text-align:left; color:#555; font-weight:600; padding:6px 8px 6px 0; width:42%; }
+  td { padding:6px 0; font-family:monospace; word-break:break-all; }
+  tr+tr th, tr+tr td { border-top:1px solid #eee; }
+  /* lista */
+  .abas { display:flex; margin:12px; background:#e3e7ee; border-radius:10px; padding:3px; }
+  .abas button { flex:1; border:0; background:none; padding:9px 4px; border-radius:8px; font-weight:600; font-size:13px; color:#555; }
+  .abas button.ativa { background:#fff; color:var(--azul); box-shadow:0 1px 2px rgba(0,0,0,.15); }
+  .item { display:flex; align-items:center; gap:12px; background:#fff; margin:8px 12px; padding:12px 14px; border-radius:10px;
+          box-shadow:0 1px 2px rgba(0,0,0,.1); text-decoration:none; color:inherit; }
+  .item .s { font-size:18px; font-weight:800; color:var(--azul); }
+  .item .g { font-size:14px; font-weight:600; }
+  .item .m { font-size:12px; color:#888; }
+  .item .dir { margin-left:auto; text-align:right; font-size:12px; color:#888; white-space:nowrap; }
+  .tag { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; color:#fff; background:var(--laranja); }
+  .tag.erro { background:var(--vermelho); }
+  .vazio { text-align:center; color:#999; padding:30px 16px; }
+  /* barra inferior */
+  nav { position:fixed; left:0; right:0; bottom:0; background:#fff; border-top:1px solid #ddd; display:flex;
+        padding-bottom:env(safe-area-inset-bottom); z-index:5; }
+  nav button { flex:1; border:0; background:none; padding:8px 0 10px; font-size:11px; color:#777; font-weight:600; position:relative; }
+  nav button span { display:block; font-size:22px; margin-bottom:2px; }
+  nav button.ativo { color:var(--azul); }
+  .badge { position:absolute; top:4px; left:50%; margin-left:8px; background:var(--laranja); color:#fff; border-radius:10px;
+           font-size:11px; padding:1px 6px; display:none; }
+</style>
+</head>
+<body>
+
+<header><span id="titulo">📷 Registar serial</span><span id="rede">online</span></header>
+
+<!-- ============ REGISTAR ============ -->
+<section id="e-registar" class="ecra">
+  <div class="card destaque">
+    <label>SERIAL NO</label>
+    <input id="serial" class="grande" autocapitalize="characters" autocomplete="off" placeholder="ex: 162744">
+  </div>
+  <div class="card">
+    <label>INFORMAÇÃO DO GRUPO</label>
+    <input id="grupo" class="maius" autocapitalize="characters" autocomplete="off" placeholder="ex: 46 VM" list="grupos">
+    <datalist id="grupos"></datalist>
+  </div>
+  <div class="seta">⇩</div>
+  <div class="card">
+    <label>FOTO 1 – ETIQUETA GRANDE <small>(placa de características)</small></label>
+    <div id="prev1" class="moldura m1">sem foto</div>
+    <div class="linha">
+      <label class="botao">📷 Tirar foto<input type="file" accept="image/*" capture="environment" onchange="escolher(this,1)" hidden></label>
+      <label class="botao sec">🖼 Galeria<input type="file" accept="image/*" onchange="escolher(this,1)" hidden></label>
+    </div>
+  </div>
+  <div class="card">
+    <label>FOTO 2 – ETIQUETA PEQUENA <small>(código de barras)</small></label>
+    <div id="prev2" class="moldura m2">sem foto</div>
+    <div class="linha">
+      <label class="botao">📷 Tirar foto<input type="file" accept="image/*" capture="environment" onchange="escolher(this,2)" hidden></label>
+      <label class="botao sec">🖼 Galeria<input type="file" accept="image/*" onchange="escolher(this,2)" hidden></label>
+    </div>
+    <p class="dica">Fotografe cada etiqueta de frente, a encher a imagem e sem reflexos.</p>
+  </div>
+  <button id="btGuardar" class="botao" onclick="guardar()">✅ Guardar</button>
+  <div id="estado"></div>
+</section>
+
+<!-- ============ RESULTADO ============ -->
+<section id="e-resultado" class="ecra">
+  <div class="card"><div id="resultado"></div></div>
+  <a id="linkFicha" class="botao" target="_blank" rel="noopener">📄 Ver ficha</a>
+  <button class="botao sec" onclick="novo()">➕ Registar outro</button>
+</section>
+
+<!-- ============ LISTA ============ -->
+<section id="e-lista" class="ecra">
+  <div class="abas">
+    <button data-aba="pendentes" class="ativa" onclick="aba('pendentes')">No telemóvel</button>
+    <button data-aba="porEnviar" onclick="aba('porEnviar')">Por enviar</button>
+    <button data-aba="enviados" onclick="aba('enviados')">Enviados</button>
+  </div>
+  <div id="lista"></div>
+  <button id="btRelatorio" class="botao" onclick="enviarRelatorio(this)">✉️ Enviar relatório agora</button>
+  <button class="botao sec" onclick="carregarLista(true)">🔄 Atualizar</button>
+</section>
+
+<!-- ============ DEFINIÇÕES ============ -->
+<section id="e-definicoes" class="ecra">
+  <div class="card">
+    <label>ENDEREÇO DO SERVIDOR <small>(URL /exec do Apps Script)</small></label>
+    <input id="cfgUrl" type="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
+    <label style="margin-top:14px">CÓDIGO DE ACESSO (PIN)</label>
+    <input id="cfgPin" type="password" inputmode="numeric" autocomplete="off">
+    <button class="botao" onclick="guardarCfg(this)">💾 Guardar e testar ligação</button>
+    <div id="cfgEstado" class="dica" style="text-align:center;font-size:14px"></div>
+  </div>
+  <div class="card">
+    <div class="rotulo">INSTALAR NO TELEMÓVEL</div>
+    <p class="dica" style="font-size:14px;color:#555">
+      <b>iPhone:</b> no Safari, botão Partilhar ⬆️ → “Adicionar ao ecrã principal”.<br>
+      <b>Android:</b> no Chrome, menu ⋮ → “Instalar aplicação”.
+    </p>
+    <button id="btInstalar" class="botao sec" style="display:none" onclick="instalar()">⬇️ Instalar aplicação</button>
+  </div>
+  <p class="dica" style="text-align:center">Versão <span id="versao"></span></p>
+</section>
+
+<nav>
+  <button data-ecra="registar" onclick="mostrar('registar')"><span>📷</span>Registar</button>
+  <button data-ecra="lista" onclick="mostrar('lista')"><span>📋</span>Lista<i id="badge" class="badge"></i></button>
+  <button data-ecra="definicoes" onclick="mostrar('definicoes')"><span>⚙️</span>Definições</button>
+</nav>
+
+<script>
+var VERSAO = '1.0.0';
+var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '' };
+var fotos = { 1: null, 2: null };
+var abaAtual = 'pendentes', cacheLista = null, aEnviarFila = false;
+
+function el(id) { return document.getElementById(id); }
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+  return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+function estado(t, erro) { el('estado').innerHTML = t || ''; el('estado').className = erro ? 'erro' : ''; }
+
+/* ---------------- Navegação ---------------- */
+var TITULOS = { registar:'📷 Registar serial', resultado:'✔ Registado', lista:'📋 Registos', definicoes:'⚙️ Definições' };
+function mostrar(nome) {
+  if (nome !== 'definicoes' && (!cfg.url || !cfg.pin)) nome = 'definicoes';
+  document.querySelectorAll('.ecra').forEach(function (s) { s.classList.toggle('ativo', s.id === 'e-' + nome); });
+  document.querySelectorAll('nav button').forEach(function (b) {
+    b.classList.toggle('ativo', b.dataset.ecra === nome || (nome === 'resultado' && b.dataset.ecra === 'registar'));
+  });
+  el('titulo').textContent = TITULOS[nome];
+  if (nome === 'lista') carregarLista(false);
+  window.scrollTo(0, 0);
+}
+
+/* ---------------- Servidor (Apps Script) ---------------- */
+function ErroServidor(msg) { this.message = msg; this.servidor = true; }
+function api(acao, dados) {
+  var corpo = Object.assign({ acao: acao, pin: cfg.pin }, dados || {});
+  return fetch(cfg.url, {
+    method: 'POST', redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },   // evita o "preflight" CORS
+    body: JSON.stringify(corpo)
+  }).then(function (r) {
+    return r.text().then(function (t) {
+      try { return JSON.parse(t); }
+      catch (e) { throw new ErroServidor('Resposta inválida do servidor. Confirme o URL e que a Aplicação Web tem acesso "Qualquer pessoa".'); }
+    });
+  }).then(function (j) {
+    if (!j.ok) throw new ErroServidor(j.erro);
+    return j.data;
+  });
+}
+
+/* ---------------- Fila no telemóvel (IndexedDB) ---------------- */
+var dbP = new Promise(function (ok, falha) {
+  var req = indexedDB.open('seriais', 1);
+  req.onupgradeneeded = function () { req.result.createObjectStore('fila', { keyPath: 'id' }); };
+  req.onsuccess = function () { ok(req.result); };
+  req.onerror = function () { falha(req.error); };
+});
+function fila(modo, fn) {
+  return dbP.then(function (db) {
+    return new Promise(function (ok, falha) {
+      var tx = db.transaction('fila', modo), st = tx.objectStore('fila'), res;
+      var r = fn(st); if (r) r.onsuccess = function () { res = r.result; };
+      tx.oncomplete = function () { ok(res); };
+      tx.onerror = function () { falha(tx.error); };
+    });
+  });
+}
+function filaTodos() { return fila('readonly', function (st) { return st.getAll(); }); }
+function filaGuardar(item) { return fila('readwrite', function (st) { return st.put(item); }); }
+function filaApagar(id) { return fila('readwrite', function (st) { return st.delete(id); }); }
+
+function atualizarBadge() {
+  filaTodos().then(function (l) {
+    el('badge').textContent = l.length; el('badge').style.display = l.length ? 'inline-block' : 'none';
+  });
+}
+
+/** Envia um registo: criar pasta → foto 1 → foto 2 → ler etiqueta. Pode repetir sem duplicar. */
+function enviarItem(item, progresso) {
+  progresso = progresso || function () {};
+  progresso('A criar registo…');
+  return api('criarPasta', { serial: item.serial, grupo: item.grupo }).then(function (pastaId) {
+    var p = Promise.resolve();
+    [1, 2].forEach(function (s) {
+      if (!item['foto' + s]) return;
+      p = p.then(function () {
+        progresso('A enviar foto ' + s + '…');
+        return api('enviarFoto', { pastaId: pastaId, slot: s, base64: item['foto' + s].split(',')[1] });
+      });
+    });
+    return p.then(function () {
+      progresso('A ler a etiqueta…');
+      return api('finalizar', { pastaId: pastaId });
+    });
+  });
+}
+
+/** Tenta enviar tudo o que ficou guardado no telemóvel. */
+function processarFila() {
+  if (aEnviarFila || !navigator.onLine || !cfg.url) return Promise.resolve();
+  aEnviarFila = true;
+  return filaTodos().then(function (lista) {
+    lista.sort(function (a, b) { return a.id - b.id; });
+    var p = Promise.resolve();
+    lista.forEach(function (item) {
+      p = p.then(function () {
+        if (item.erro) return;   // erro do servidor: espera que o utilizador tente de novo
+        return enviarItem(item).then(function () { return filaApagar(item.id); })
+          .catch(function (e) {
+            if (e.servidor) { item.erro = e.message; return filaGuardar(item); }
+            throw e;             // sem rede: pára e tenta mais tarde
+          });
+      });
+    });
+    return p;
+  }).catch(function () {}).then(function () {
+    aEnviarFila = false; atualizarBadge();
+    if (el('e-lista').classList.contains('ativo')) {
+      desenharLista();
+      if (navigator.onLine) api('listar').then(function (d) { cacheLista = d; desenharLista(); }).catch(function () {});
+    }
+  });
+}
+
+/* ---------------- Fotos ---------------- */
+function reduzir(file, cb) {
+  var img = new Image(), url = URL.createObjectURL(file);
+  img.onload = function () {
+    var max = 1600, k = Math.min(1, max / Math.max(img.width, img.height));
+    var c = document.createElement('canvas');
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    cb(c.toDataURL('image/jpeg', 0.85));
+  };
+  img.onerror = function () { estado('❌ Não foi possível ler a foto.', true); };
+  img.src = url;
+}
+function escolher(input, slot) {
+  if (!input.files.length) return;
+  reduzir(input.files[0], function (d) { fotos[slot] = d; desenharFotos(); });
+  input.value = '';
+}
+function desenharFotos() {
+  [1, 2].forEach(function (s) {
+    el('prev' + s).innerHTML = fotos[s] ? '<img src="' + fotos[s] + '"><b onclick="remover(' + s + ')">✕</b>' : 'sem foto';
+    el('prev' + s).className = 'moldura m' + s + (fotos[s] ? ' cheia' : '');
+  });
+}
+function remover(s) { fotos[s] = null; desenharFotos(); }
+
+/* ---------------- Registar ---------------- */
+function guardar() {
+  var serial = el('serial').value.trim().toUpperCase(), grupo = el('grupo').value.trim().toUpperCase();
+  if (!serial) return estado('Escreva o serial.', true);
+  if (!/^[A-Z0-9./]{2,30}$/.test(serial)) return estado('Serial inválido (só letras, números, . e /).', true);
+  if (!fotos[1] && !fotos[2]) return estado('Tire as fotos das etiquetas.', true);
+  if ((!fotos[1] || !fotos[2]) && !confirm('Falta a foto ' + (fotos[1] ? 2 : 1) + '. Guardar mesmo assim?')) return;
+
+  var item = { id: Date.now(), serial: serial, grupo: grupo, foto1: fotos[1], foto2: fotos[2],
+               criado: new Date().toLocaleString('pt-PT') };
+  lembrarGrupo(grupo);
+  var bt = el('btGuardar'); bt.disabled = true;
+
+  // 1.º guarda no telemóvel (nunca se perde), depois tenta enviar
+  filaGuardar(item).then(function () {
+    atualizarBadge();
+    if (!navigator.onLine) throw { semRede: true };
+    aEnviarFila = true;   // impede a fila de enviar o mesmo item ao mesmo tempo
+    return enviarItem(item, estado);
+  }).then(function (r) {
+    return filaApagar(item.id).then(function () { mostrarResultado(r, true); });
+  }).catch(function (e) {
+    if (e && e.servidor) { item.erro = e.message; filaGuardar(item); estado('❌ ' + e.message, true); return; }
+    mostrarResultado(item, false);
+  }).then(function () { aEnviarFila = false; bt.disabled = false; atualizarBadge(); });
+}
+
+function mostrarResultado(r, enviado) {
+  var d = r.dados || {}, linhas = '';
+  [['Modelo', d.modelo], ['Serial etiqueta', d.serial], ['EAN', d.ean], ['Voltagem', d.voltagem]].forEach(function (c) {
+    if (c[1]) linhas += '<tr><th>' + c[0] + '</th><td>' + esc(c[1]) + '</td></tr>';
+  });
+  el('resultado').innerHTML =
+    '<div class="serial">' + esc(r.serial) + '</div><div class="grupo">' + esc(r.grupo || '') + '</div>' +
+    (enviado ? '<p>✅ Enviado para o Google Drive (' + r.fotos + ' foto(s)).</p>'
+             : '<p><span class="tag">Sem rede</span> Guardado no telemóvel. É enviado automaticamente quando houver ligação.</p>') +
+    (linhas ? '<table>' + linhas + '</table>' : '');
+  el('linkFicha').style.display = enviado ? 'block' : 'none';
+  if (enviado) el('linkFicha').href = r.link;
+  estado('');
+  mostrar('resultado');
+}
+
+function novo() {
+  fotos = { 1: null, 2: null }; desenharFotos();
+  el('serial').value = '';   // o grupo fica, porque costuma repetir-se
+  mostrar('registar');
+  el('serial').focus();
+}
+
+function lembrarGrupo(g) {
+  if (!g) return;
+  var l = JSON.parse(localStorage.getItem('grupos') || '[]').filter(function (x) { return x !== g; });
+  l.unshift(g); localStorage.setItem('grupos', JSON.stringify(l.slice(0, 15)));
+  desenharGrupos();
+}
+function desenharGrupos() {
+  el('grupos').innerHTML = JSON.parse(localStorage.getItem('grupos') || '[]')
+    .map(function (g) { return '<option value="' + esc(g) + '">'; }).join('');
+}
+
+/* ---------------- Lista ---------------- */
+function aba(nome) {
+  abaAtual = nome;
+  document.querySelectorAll('.abas button').forEach(function (b) { b.classList.toggle('ativa', b.dataset.aba === nome); });
+  desenharLista();
+}
+function carregarLista(forcar) {
+  processarFila();
+  if (!navigator.onLine) { desenharLista(); return; }
+  if (cacheLista && !forcar) desenharLista();
+  else el('lista').innerHTML = '<div class="vazio">A carregar…</div>';
+  api('listar').then(function (d) { cacheLista = d; desenharLista(); })
+    .catch(function (e) { if (abaAtual !== 'pendentes') el('lista').innerHTML = '<div class="vazio">❌ ' + esc(e.message) + '</div>'; });
+}
+function desenharLista() {
+  if (abaAtual === 'pendentes') {
+    filaTodos().then(function (l) {
+      el('lista').innerHTML = l.length ? l.map(function (it) {
+        return '<div class="item"><div><div class="s">' + esc(it.serial) + '</div><div class="g">' + esc(it.grupo) + '</div>' +
+          '<div class="m">' + esc(it.criado) + '</div>' +
+          (it.erro ? '<div class="m" style="color:#c62828">' + esc(it.erro) + '</div>' : '') + '</div>' +
+          '<div class="dir">' + (it.erro ? '<span class="tag erro">Erro</span><br><br><a href="#" onclick="repetir(' + it.id + ');return false">Tentar de novo</a>'
+                                         : '<span class="tag">A aguardar rede</span>') +
+          '<br><br><a href="#" style="color:#c62828" onclick="apagar(' + it.id + ');return false">Apagar</a></div></div>';
+      }).join('') : '<div class="vazio">✅ Nada por enviar no telemóvel.</div>';
+    });
+    return;
+  }
+  if (!cacheLista) { el('lista').innerHTML = '<div class="vazio">' + (navigator.onLine ? 'A carregar…' : 'Sem rede.') + '</div>'; return; }
+  var l = cacheLista[abaAtual] || [];
+  el('lista').innerHTML = l.length ? l.map(function (it) {
+    return '<a class="item" href="' + esc(it.link) + '" target="_blank" rel="noopener"><div>' +
+      '<div class="s">' + esc(it.serial) + '</div><div class="g">' + esc(it.grupo) + '</div>' +
+      '<div class="m">' + esc(it.modelo || '') + '</div></div>' +
+      '<div class="dir">' + esc(it.data) + '<br>📷 ' + it.fotos + '</div></a>';
+  }).join('') : '<div class="vazio">Sem registos.</div>';
+}
+function repetir(id) {
+  filaTodos().then(function (l) {
+    var it = l.filter(function (x) { return x.id === id; })[0]; if (!it) return;
+    delete it.erro; return filaGuardar(it);
+  }).then(processarFila);
+}
+function apagar(id) {
+  if (!confirm('Apagar este registo do telemóvel? As fotos não foram enviadas.')) return;
+  filaApagar(id).then(function () { atualizarBadge(); desenharLista(); });
+}
+function enviarRelatorio(bt) {
+  if (!confirm('Enviar agora o relatório em PDF por email com todos os seriais por enviar?')) return;
+  bt.disabled = true; bt.textContent = 'A enviar… (pode demorar)';
+  processarFila().then(function () { return api('enviarRelatorio'); }).then(function (r) {
+    bt.textContent = r.enviados ? '✔ Relatório enviado (' + r.enviados + ')' : 'Nada para enviar';
+    cacheLista = null; carregarLista(true);
+  }).catch(function (e) { bt.textContent = '❌ ' + e.message; })
+    .then(function () { setTimeout(function () { bt.disabled = false; bt.textContent = '✉️ Enviar relatório agora'; }, 4000); });
+}
+
+/* ---------------- Definições ---------------- */
+function guardarCfg(bt) {
+  var url = el('cfgUrl').value.trim(), pin = el('cfgPin').value.trim();
+  if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) { el('cfgEstado').textContent = '❌ O URL tem de começar por https://script.google.com/ e terminar em /exec'; return; }
+  cfg.url = url; cfg.pin = pin;
+  bt.disabled = true; el('cfgEstado').textContent = 'A testar…';
+  api('ping').then(function () {
+    localStorage.setItem('url', url); localStorage.setItem('pin', pin);
+    el('cfgEstado').textContent = '✅ Ligação OK';
+    setTimeout(function () { mostrar('registar'); }, 700);
+    processarFila();
+  }).catch(function (e) {
+    el('cfgEstado').textContent = '❌ ' + (e.servidor ? e.message : 'Sem ligação ao servidor.');
+  }).then(function () { bt.disabled = false; });
+}
+
+/* ---------------- Instalação / rede ---------------- */
+var pedidoInstalar = null;
+window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); pedidoInstalar = e; el('btInstalar').style.display = 'block'; });
+function instalar() { if (pedidoInstalar) { pedidoInstalar.prompt(); pedidoInstalar = null; el('btInstalar').style.display = 'none'; } }
+
+function atualizarRede() {
+  el('rede').textContent = navigator.onLine ? 'online' : 'sem rede';
+  el('rede').className = navigator.onLine ? '' : 'off';
+  if (navigator.onLine) processarFila();
+}
+window.addEventListener('online', atualizarRede);
+window.addEventListener('offline', atualizarRede);
+document.addEventListener('visibilitychange', function () { if (!document.hidden) processarFila(); });
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+
+/* ---------------- Arranque ---------------- */
+el('versao').textContent = VERSAO;
+el('cfgUrl').value = cfg.url; el('cfgPin').value = cfg.pin;
+desenharGrupos(); atualizarRede(); atualizarBadge();
+mostrar('registar');
+</script>
+</body>
+</html>

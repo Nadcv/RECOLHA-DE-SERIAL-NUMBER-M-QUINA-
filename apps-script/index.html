@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registar serial</title>
+<style>
+  /* --- base (igual à página da ficha) --- */
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,Roboto,Arial,sans-serif;background:#f1f3f6;color:#222}
+    header{background:#1a3d8f;color:#fff;padding:16px;font-size:18px;font-weight:600;text-align:center}
+    .card{background:#fff;margin:12px;padding:14px 16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+    .destaque{border:2px solid #000}
+    .rotulo{font-size:12px;font-weight:700;color:#666;letter-spacing:.5px;margin-bottom:6px}
+    .serial{font-size:38px;font-weight:800;color:#1a3d8f}
+    .grupo{font-size:26px;font-weight:700}
+    table{width:100%;border-collapse:collapse;font-size:15px}
+    th{text-align:left;color:#555;font-weight:600;padding:7px 8px 7px 0;width:42%;vertical-align:top}
+    td{padding:7px 0;word-break:break-all;font-family:monospace;font-size:15px}
+    tr+tr th,tr+tr td{border-top:1px solid #eee}
+    img{width:100%;border-radius:8px;margin-top:8px;display:block}
+    img.zoom{position:fixed;inset:0;margin:0;width:100vw;height:100vh;object-fit:contain;background:#000;z-index:9;border-radius:0}
+    .botao{display:block;margin:12px;padding:14px;text-align:center;border-radius:10px;background:#1a3d8f;color:#fff;text-decoration:none;font-weight:600}
+    .botao.sec{background:#fff;color:#1a3d8f;border:1px solid #1a3d8f}
+    footer{text-align:center;color:#888;font-size:12px;padding:8px 0 24px}
+</style>
+</head>
+<body>
+<header>📷 Registar serial</header>
+
+<div id="ecraPin" class="card">
+  <label>Código de acesso</label>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+  <button class="botao" onclick="entrar()">Entrar</button>
+</div>
+
+<div id="ecraForm" style="display:none">
+  <div class="card destaque">
+    <label>SERIAL NO</label>
+    <input id="serial" class="grande" inputmode="text" autocapitalize="characters" placeholder="ex: 162744">
+  </div>
+  <div class="card">
+    <label>INFORMAÇÃO DO GRUPO</label>
+    <input id="grupo" autocapitalize="characters" placeholder="ex: 30 VE">
+  </div>
+  <div class="seta">⇩</div>
+  <div class="card">
+    <label>FOTO 1 – ETIQUETA GRANDE <small>(placa de características)</small></label>
+    <div id="prev1" class="moldura m1">sem foto</div>
+    <div class="linha">
+      <label class="botao meio">📷 Tirar foto
+        <input type="file" accept="image/*" capture="environment" onchange="escolher(this, 1)" hidden></label>
+      <label class="botao meio sec">🖼 Galeria
+        <input type="file" accept="image/*" onchange="escolher(this, 1)" hidden></label>
+    </div>
+  </div>
+  <div class="card">
+    <label>FOTO 2 – ETIQUETA PEQUENA <small>(código de barras)</small></label>
+    <div id="prev2" class="moldura m2">sem foto</div>
+    <div class="linha">
+      <label class="botao meio">📷 Tirar foto
+        <input type="file" accept="image/*" capture="environment" onchange="escolher(this, 2)" hidden></label>
+      <label class="botao meio sec">🖼 Galeria
+        <input type="file" accept="image/*" onchange="escolher(this, 2)" hidden></label>
+    </div>
+    <p class="dica">Dica: fotografe cada etiqueta de frente, a encher a imagem e sem reflexos.</p>
+  </div>
+  <button id="btGuardar" class="botao" onclick="guardar()">✅ Guardar</button>
+  <div id="estado"></div>
+</div>
+
+<div id="ecraFim" style="display:none">
+  <div class="card"><h2>Registado ✔</h2><div id="resumo"></div></div>
+  <a id="linkFicha" class="botao" target="_blank">📄 Ver ficha</a>
+  <button class="botao sec" onclick="novo()">➕ Registar outro</button>
+  <button class="botao sec" onclick="enviarAgora(this)">✉️ Enviar relatório agora</button>
+</div>
+
+<script>
+var PIN = '', fotos = { 1: null, 2: null };
+
+function el(id) { return document.getElementById(id); }
+function estado(t, erro) { el('estado').innerHTML = t; el('estado').className = erro ? 'erro' : ''; }
+function falha(btn) { return function (e) { estado('❌ ' + (e.message || e), true); if (btn) btn.disabled = false; }; }
+
+function entrar() {
+  PIN = el('pin').value;
+  try { localStorage.setItem('pin', PIN); } catch (e) {}
+  el('ecraPin').style.display = 'none';
+  el('ecraForm').style.display = 'block';
+}
+try { if (localStorage.getItem('pin')) { el('pin').value = localStorage.getItem('pin'); } } catch (e) {}
+
+// Reduz a foto no telemóvel (máx. 1600px, JPEG) para o envio ser rápido
+function reduzir(file, cb) {
+  var img = new Image(), url = URL.createObjectURL(file);
+  img.onload = function () {
+    var max = 1600, w = img.width, h = img.height, k = Math.min(1, max / Math.max(w, h));
+    var c = document.createElement('canvas');
+    c.width = Math.round(w * k); c.height = Math.round(h * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    cb(c.toDataURL('image/jpeg', 0.85));
+  };
+  img.onerror = function () { estado('❌ Não foi possível ler ' + file.name, true); };
+  img.src = url;
+}
+
+function escolher(input, slot) {
+  if (!input.files.length) return;
+  reduzir(input.files[0], function (dataUrl) { fotos[slot] = dataUrl; desenhar(); });
+  input.value = '';
+}
+
+function desenhar() {
+  for (var s = 1; s <= 2; s++) {
+    el('prev' + s).innerHTML = fotos[s]
+      ? '<img src="' + fotos[s] + '"><b onclick="remover(' + s + ')">✕</b>'
+      : 'sem foto';
+    el('prev' + s).className = 'moldura m' + s + (fotos[s] ? ' cheia' : '');
+  }
+}
+function remover(s) { fotos[s] = null; desenhar(); }
+
+function guardar() {
+  var serial = el('serial').value.trim(), grupo = el('grupo').value.trim(), btn = el('btGuardar');
+  if (!serial) return estado('Escreva o serial.', true);
+  if (!fotos[1] && !fotos[2]) return estado('Tire as fotos das etiquetas.', true);
+  if (!fotos[1] || !fotos[2]) {
+    if (!confirm('Falta a foto ' + (fotos[1] ? 2 : 1) + '. Guardar mesmo assim?')) return;
+  }
+  btn.disabled = true;
+  estado('A criar registo…');
+  google.script.run.withFailureHandler(falha(btn)).withSuccessHandler(function (pastaId) {
+    enviarFoto(pastaId, 1, btn);
+  }).formCriarPasta(PIN, serial, grupo);
+}
+
+function enviarFoto(pastaId, slot, btn) {
+  if (slot > 2) {
+    estado('A ler a etiqueta… (pode demorar uns segundos)');
+    google.script.run.withFailureHandler(falha(btn)).withSuccessHandler(fim).formFinalizar(PIN, pastaId);
+    return;
+  }
+  if (!fotos[slot]) return enviarFoto(pastaId, slot + 1, btn);
+  estado('A enviar foto ' + slot + ' de 2…');
+  google.script.run.withFailureHandler(falha(btn)).withSuccessHandler(function () {
+    enviarFoto(pastaId, slot + 1, btn);
+  }).formEnviarFoto(PIN, pastaId, fotos[slot].split(',')[1], slot);
+}
+
+function fim(r) {
+  var d = r.dados || {}, linhas = '';
+  var campos = [['Modelo', d.modelo], ['Serial etiqueta', d.serial], ['EAN', d.ean], ['Voltagem', d.voltagem]];
+  for (var i = 0; i < campos.length; i++) if (campos[i][1]) linhas += '<tr><th>' + campos[i][0] + '</th><td>' + campos[i][1] + '</td></tr>';
+  el('resumo').innerHTML = '<div class="serial">' + r.serial + '</div><div class="grupo">' + (r.grupo || '') + '</div>' +
+    '<p>' + r.fotos + ' foto(s) na pasta</p>' + (linhas ? '<table>' + linhas + '</table>' : '');
+  el('linkFicha').href = r.link;
+  el('ecraForm').style.display = 'none';
+  el('ecraFim').style.display = 'block';
+  el('btGuardar').disabled = false;
+  estado('');
+}
+
+function novo() {
+  fotos = { 1: null, 2: null }; desenhar();
+  el('serial').value = ''; el('grupo').value = '';
+  el('ecraFim').style.display = 'none';
+  el('ecraForm').style.display = 'block';
+}
+
+function enviarAgora(btn) {
+  btn.disabled = true; btn.textContent = 'A enviar…';
+  google.script.run
+    .withFailureHandler(function (e) { btn.disabled = false; btn.textContent = '❌ ' + (e.message || e); })
+    .withSuccessHandler(function () { btn.textContent = '✔ Relatório enviado'; })
+    .formEnviarRelatorio(PIN);
+}
+</script>
+<style>
+  /* --- formulário --- */
+  label{display:block;font-size:12px;font-weight:700;color:#666;letter-spacing:.5px;margin-bottom:6px}
+  input{width:100%;font-size:18px;padding:12px;border:1px solid #ccc;border-radius:8px}
+  input.grande{font-size:28px;font-weight:800;color:#1a3d8f}
+  button.botao{width:calc(100% - 24px);border:0;font-size:16px}
+  .card .botao{width:100%;margin:12px 0 0}
+  button:disabled{opacity:.5}
+  .linha{display:flex;gap:10px}
+  .botao.meio{flex:1;margin:0;color:#fff;font-size:15px;letter-spacing:0;cursor:pointer}
+  .botao.meio.sec{color:#1a3d8f}
+  label small{font-weight:400;letter-spacing:0}
+  .seta{text-align:center;font-size:28px;color:#555;margin:-6px 0 -8px}
+  .moldura{position:relative;border:2px dashed #bbb;border-radius:8px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:14px;overflow:hidden;background:#fafafa}
+  .moldura.m1{aspect-ratio:400/280}
+  .moldura.m2{aspect-ratio:515/200}
+  .moldura.cheia{border:2px solid #000;background:#fff}
+  .moldura img{margin:0;width:100%;height:100%;object-fit:contain;border-radius:0}
+  .moldura b{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;border-radius:50%;width:26px;height:26px;text-align:center;line-height:26px}
+  .dica{font-size:12px;color:#888;margin:10px 0 0}
+  #estado{text-align:center;padding:8px 16px;color:#1a3d8f;font-weight:600}
+  #estado.erro{color:#c00}
+  h2{margin:0 0 8px}
+</style>
+</body>
+</html>
