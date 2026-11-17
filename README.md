@@ -11,16 +11,23 @@ com **QR code**, e envia-o por **email**.
 ## Funcionalidades
 - Fotos com a câmara ou da galeria, reduzidas no telemóvel (envio rápido)
 - **Funciona sem rede**: guarda no telemóvel e envia sozinho quando houver ligação
-- Leitura automática da etiqueta (OCR): modelo, serial, EAN, voltagem…
-- PDF com o layout da folha: SERIAL NO · INFORMAÇÃO DO GRUPO · Foto 1 · Foto 2 · QR code
-- O QR abre uma ficha no telemóvel com os dados e as fotos
-- Lista de registos (no telemóvel / por enviar / enviados) e botão "Enviar relatório agora"
+- Leitura de **todos os campos** das etiquetas: por IA (Gemini, opcional) ou por OCR
+- **Leitor de códigos de barras** com a câmara (serial e EAN exatos)
+- **Rever / corrigir** os dados lidos antes de enviar
+- Técnico, **cliente/obra**, local e observações em cada registo
+- **Aviso de duplicados** quando o serial já foi registado
+- PDF com o layout da folha (folha 1) + **folha 2 com os dados lidos**; QR code para a ficha
+- **Folha de cálculo "Registo de Seriais"** no Drive com o histórico (uma linha por máquina)
+- **Pesquisa** de registos (serial, modelo, cliente…)
+- Relatório com **registos escolhidos** e **emails à escolha**
+- **Etiquetas QR para imprimir** (PDF A4, 3 por linha)
 
 ## Estrutura
 | Ficheiro | O que é |
 |---|---|
 | `index.html`, `sw.js`, `manifest.webmanifest`, `icons/` | A aplicação (publicada no GitHub Pages) |
-| `apps-script/Codigo.gs`, `appsscript.json` | Servidor no Google Apps Script |
+| `apps-script/Codigo.gs`, `apps-script/Funcionalidades.gs`, `appsscript.json` | Servidor no Google Apps Script |
+| `vendor/zxing.min.js` | Leitor de códigos de barras (ZXing, licença Apache 2.0) |
 | `.github/workflows/servidor.yml` | Publica o servidor automaticamente |
 | `apps-script/index.html` | Formulário alternativo dentro do Apps Script (ficheiro HTML `index`) |
 

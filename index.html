@@ -75,6 +75,35 @@
   nav button { flex:1; border:0; background:none; padding:8px 0 10px; font-size:11px; color:#777; font-weight:600; position:relative; }
   nav button span { display:block; font-size:22px; margin-bottom:2px; }
   nav button.ativo { color:var(--azul); }
+  textarea { width:100%; font-size:16px; padding:10px 12px; border:1px solid #ccc; border-radius:8px; font-family:inherit; min-height:70px; }
+  .campo-ic { display:flex; gap:8px; align-items:stretch; }
+  .campo-ic input { flex:1; }
+  .ic { border:1px solid var(--azul); background:#fff; color:var(--azul); border-radius:8px; font-size:22px; padding:0 14px; }
+  .sep { margin-top:12px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+  .chip { background:#e8eefb; color:var(--azul); border-radius:14px; padding:5px 10px; font-size:13px; font-family:monospace; }
+  .chip b { margin-left:6px; color:#c62828; cursor:pointer; }
+  .pesquisa { display:flex; gap:8px; margin:12px; }
+  .pesquisa input { flex:1; font-size:16px; padding:10px 12px; }
+  .pesquisa button { border:0; background:var(--azul); color:#fff; border-radius:8px; padding:0 14px; font-size:18px; }
+  .item input[type=checkbox] { width:24px; height:24px; flex:none; }
+  .item .corpo { flex:1; min-width:0; text-decoration:none; color:inherit; display:flex; gap:12px; align-items:center; }
+  .item .ed { border:0; background:none; font-size:20px; padding:4px; }
+  .selbar { position:sticky; bottom:calc(64px + env(safe-area-inset-bottom)); background:#fff; margin:0 12px; padding:8px;
+            border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,.2); display:none; gap:8px; z-index:4; }
+  .selbar .botao { margin:0; flex:1; font-size:14px; padding:12px 6px; }
+  .tag.ok { background:var(--verde); } .tag.cinza { background:#888; }
+  .ed-linha { display:flex; gap:6px; margin-bottom:6px; }
+  .ed-linha input { font-size:14px; padding:8px; }
+  .ed-linha input:first-child { flex:0 0 40%; font-weight:600; }
+  .ed-linha button { border:0; background:none; color:#c62828; font-size:20px; }
+  #scanner { position:fixed; inset:0; background:#000; z-index:20; display:none; flex-direction:column; }
+  #scanner video { flex:1; width:100%; object-fit:cover; min-height:0; }
+  #scanner .mira { position:absolute; left:8%; right:8%; top:30%; height:22%; border:3px solid #4ade80; border-radius:12px;
+                   box-shadow:0 0 0 2000px rgba(0,0,0,.35); pointer-events:none; }
+  #scanner .barra { background:#111; color:#fff; padding:12px 12px calc(12px + env(safe-area-inset-bottom)); }
+  #scanner .barra p { margin:0 0 8px; font-size:14px; }
+  #scanner .chip { background:#1f2937; color:#4ade80; }
   .badge { position:absolute; top:4px; left:50%; margin-left:8px; background:var(--laranja); color:#fff; border-radius:10px;
            font-size:11px; padding:1px 6px; display:none; }
 </style>
@@ -87,7 +116,10 @@
 <section id="e-registar" class="ecra">
   <div class="card destaque">
     <label>SERIAL NO</label>
-    <input id="serial" class="grande" autocapitalize="characters" autocomplete="off" placeholder="ex: 162744">
+    <div class="campo-ic">
+      <input id="serial" class="grande" autocapitalize="characters" autocomplete="off" placeholder="ex: 162744">
+      <button class="ic" title="Ler código" onclick="abrirScanner('serial')">▥</button>
+    </div>
   </div>
   <div class="card">
     <label>INFORMAÇÃO DO GRUPO</label>
@@ -112,6 +144,21 @@
     </div>
     <p class="dica">Fotografe cada etiqueta de frente, a encher a imagem e sem reflexos.</p>
   </div>
+  <div class="card">
+    <label>CÓDIGOS DE BARRAS <small>(opcional – leitura exata do serial e EAN)</small></label>
+    <div id="chipsCod" class="chips"></div>
+    <button class="botao sec" onclick="abrirScanner('codigos')">▥ Ler códigos de barras da etiqueta</button>
+  </div>
+  <div class="card">
+    <label>CLIENTE / OBRA</label>
+    <input id="cliente" autocomplete="off" list="clientes" placeholder="opcional">
+    <datalist id="clientes"></datalist>
+    <label class="sep">LOCAL</label>
+    <input id="local" autocomplete="off" placeholder="opcional">
+    <label class="sep">OBSERVAÇÕES</label>
+    <textarea id="obs" placeholder="opcional"></textarea>
+    <p class="dica" id="tecInfo"></p>
+  </div>
   <button id="btGuardar" class="botao" onclick="guardar()">✅ Guardar</button>
   <div id="estado"></div>
 </section>
@@ -119,20 +166,68 @@
 <!-- ============ RESULTADO ============ -->
 <section id="e-resultado" class="ecra">
   <div class="card"><div id="resultado"></div></div>
-  <a id="linkFicha" class="botao" target="_blank" rel="noopener">📄 Ver ficha</a>
+  <button id="btRever" class="botao" onclick="abrirEditar(ultimoResultado)">✏️ Rever / corrigir dados</button>
+  <a id="linkFicha" class="botao sec" target="_blank" rel="noopener">📄 Ver ficha</a>
   <button class="botao sec" onclick="novo()">➕ Registar outro</button>
 </section>
 
 <!-- ============ LISTA ============ -->
 <section id="e-lista" class="ecra">
+  <form class="pesquisa" onsubmit="pesquisar();return false">
+    <input id="q" type="search" placeholder="Pesquisar serial, modelo, cliente…" autocomplete="off">
+    <button type="submit">🔍</button>
+  </form>
   <div class="abas">
     <button data-aba="pendentes" class="ativa" onclick="aba('pendentes')">No telemóvel</button>
     <button data-aba="porEnviar" onclick="aba('porEnviar')">Por enviar</button>
     <button data-aba="enviados" onclick="aba('enviados')">Enviados</button>
+    <button data-aba="resultados" onclick="aba('resultados')" id="abaRes" style="display:none">🔍</button>
   </div>
   <div id="lista"></div>
-  <button id="btRelatorio" class="botao" onclick="enviarRelatorio(this)">✉️ Enviar relatório agora</button>
+  <div id="selbar" class="selbar">
+    <button class="botao" id="btSelEnviar" onclick="abrirEnvio(true)">✉️ Enviar</button>
+    <button class="botao sec" id="btSelQR" onclick="etiquetasQR(this)">🏷 Etiquetas QR</button>
+  </div>
+  <button id="btRelatorio" class="botao" onclick="abrirEnvio(false)">✉️ Enviar relatório…</button>
+  <a id="btFolha" class="botao sec" target="_blank" rel="noopener" style="display:none">📊 Abrir folha de cálculo</a>
   <button class="botao sec" onclick="carregarLista(true)">🔄 Atualizar</button>
+  <p class="dica" style="text-align:center">Marque ☑ os registos para enviar só alguns ou imprimir etiquetas QR.</p>
+</section>
+
+<!-- ============ ENVIAR RELATÓRIO ============ -->
+<section id="e-enviar" class="ecra">
+  <div class="card">
+    <label>REGISTOS A ENVIAR</label>
+    <div id="envLista"></div>
+  </div>
+  <div class="card">
+    <label>ENVIAR PARA <small>(vazio = destinatários habituais)</small></label>
+    <input id="envEmails" type="email" multiple autocomplete="off" list="emailsUsados" placeholder="">
+    <datalist id="emailsUsados"></datalist>
+    <p class="dica">Vários emails separados por vírgula. Sem acentos nem espaços.</p>
+  </div>
+  <button id="btEnviarRel" class="botao" onclick="enviarRelatorio(this)">✉️ Enviar relatório</button>
+  <button class="botao sec" onclick="mostrar('lista')">Cancelar</button>
+</section>
+
+<!-- ============ REVER / CORRIGIR ============ -->
+<section id="e-editar" class="ecra">
+  <div class="card destaque"><div id="edCab"></div></div>
+  <div class="card">
+    <label>CLIENTE / OBRA</label><input id="edCliente" list="clientes" autocomplete="off">
+    <label class="sep">LOCAL</label><input id="edLocal" autocomplete="off">
+    <label class="sep">TÉCNICO</label><input id="edTecnico" autocomplete="off">
+    <label class="sep">OBSERVAÇÕES</label><textarea id="edObs"></textarea>
+  </div>
+  <div class="card">
+    <label>DADOS DAS ETIQUETAS <small id="edFonte"></small></label>
+    <div id="edCampos"></div>
+    <button class="botao sec" onclick="edAdicionar()">➕ Adicionar campo</button>
+  </div>
+  <button id="btEdGuardar" class="botao" onclick="edGuardar(this)">💾 Guardar correções</button>
+  <a id="edFicha" class="botao sec" target="_blank" rel="noopener">📄 Ver ficha</a>
+  <button class="botao sec" onclick="mostrar(edVoltar)">← Voltar</button>
+  <div id="edEstado" class="dica" style="text-align:center;font-size:14px"></div>
 </section>
 
 <!-- ============ DEFINIÇÕES ============ -->
@@ -142,6 +237,8 @@
     <input id="cfgUrl" type="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
     <label style="margin-top:14px">CÓDIGO DE ACESSO (PIN)</label>
     <input id="cfgPin" type="password" inputmode="numeric" autocomplete="off">
+    <label style="margin-top:14px">O SEU NOME <small>(técnico – aparece nos registos)</small></label>
+    <input id="cfgTecnico" autocomplete="name" placeholder="ex: João Silva">
     <button class="botao" onclick="guardarCfg(this)">💾 Guardar e testar ligação</button>
     <div id="cfgEstado" class="dica" style="text-align:center;font-size:14px"></div>
   </div>
@@ -156,6 +253,16 @@
   <p class="dica" style="text-align:center">Versão <span id="versao"></span></p>
 </section>
 
+<div id="scanner">
+  <video id="scanVideo" playsinline muted autoplay></video>
+  <div class="mira"></div>
+  <div class="barra">
+    <p id="scanMsg">Aponte a câmara ao código de barras.</p>
+    <div id="scanChips" class="chips"></div>
+    <div class="linha"><button class="botao sec" onclick="fecharScanner()">Concluir</button></div>
+  </div>
+</div>
+
 <nav>
   <button data-ecra="registar" onclick="mostrar('registar')"><span>📷</span>Registar</button>
   <button data-ecra="lista" onclick="mostrar('lista')"><span>📋</span>Lista<i id="badge" class="badge"></i></button>
@@ -163,10 +270,11 @@
 </nav>
 
 <script>
-var VERSAO = '1.1.0';
+var VERSAO = '1.2.0';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '' };
 var fotos = { 1: null, 2: null };
 var abaAtual = 'pendentes', cacheLista = null, aEnviarFila = false;
+var codigos = [], ultimoResultado = null, edAtual = null, edVoltar = 'lista', selecionados = {}, resultadosPesquisa = null;
 
 function el(id) { return document.getElementById(id); }
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
@@ -174,12 +282,14 @@ function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function
 function estado(t, erro) { el('estado').innerHTML = t || ''; el('estado').className = erro ? 'erro' : ''; }
 
 /* ---------------- Navegação ---------------- */
-var TITULOS = { registar:'📷 Registar serial', resultado:'✔ Registado', lista:'📋 Registos', definicoes:'⚙️ Definições' };
+var TITULOS = { registar:'📷 Registar serial', resultado:'✔ Registado', lista:'📋 Registos', definicoes:'⚙️ Definições',
+                enviar:'✉️ Enviar relatório', editar:'✏️ Rever dados' };
+var NAV_DE = { resultado:'registar', enviar:'lista', editar:'lista' };
 function mostrar(nome) {
   if (nome !== 'definicoes' && (!cfg.url || !cfg.pin)) nome = 'definicoes';
   document.querySelectorAll('.ecra').forEach(function (s) { s.classList.toggle('ativo', s.id === 'e-' + nome); });
   document.querySelectorAll('nav button').forEach(function (b) {
-    b.classList.toggle('ativo', b.dataset.ecra === nome || (nome === 'resultado' && b.dataset.ecra === 'registar'));
+    b.classList.toggle('ativo', b.dataset.ecra === nome || NAV_DE[nome] === b.dataset.ecra);
   });
   el('titulo').textContent = TITULOS[nome];
   if (nome === 'lista') carregarLista(false);
@@ -247,7 +357,7 @@ function enviarItem(item, progresso) {
     });
     return p.then(function () {
       progresso('A ler a etiqueta…');
-      return api('finalizar', { pastaId: pastaId });
+      return api('finalizar', { pastaId: pastaId, extras: item.extras || {}, codigos: item.codigos || [] });
     });
   });
 }
@@ -314,10 +424,38 @@ function guardar() {
   if (!fotos[1] && !fotos[2]) return estado('Tire as fotos das etiquetas.', true);
   if ((!fotos[1] || !fotos[2]) && !confirm('Falta a foto ' + (fotos[1] ? 2 : 1) + '. Guardar mesmo assim?')) return;
 
-  var item = { id: Date.now(), serial: serial, grupo: grupo, foto1: fotos[1], foto2: fotos[2],
-               criado: new Date().toLocaleString('pt-PT') };
-  lembrarGrupo(grupo);
   var bt = el('btGuardar'); bt.disabled = true;
+  verificarDuplicado(serial).then(function (aviso) {
+    if (aviso && !confirm(aviso + '\n\nRegistar de novo?')) { bt.disabled = false; estado(''); return; }
+    gravar(serial, grupo, bt);
+  });
+}
+
+/** Procura o serial no telemóvel e no servidor. Devolve o texto do aviso, ou '' se for novo. */
+function verificarDuplicado(serial) {
+  return filaTodos().then(function (l) {
+    if (l.some(function (x) { return x.serial === serial; }))
+      return 'O serial ' + serial + ' já está guardado neste telemóvel (à espera de envio).';
+    if (!navigator.onLine) return '';
+    estado('A verificar se o serial já existe…');
+    var tempo = new Promise(function (ok) { setTimeout(function () { ok(null); }, 7000); });
+    return Promise.race([api('verificar', { serial: serial }).catch(function () { return null; }), tempo])
+      .then(function (r) {
+        estado('');
+        if (!r || !r.existe) return '';
+        var x = r.registos[0];
+        return '⚠️ O serial ' + serial + ' já foi registado' + (x.data ? ' em ' + x.data : '') +
+               (x.grupo ? ' (grupo ' + x.grupo + ')' : '') + ' — ' + (x.estado === 'Enviado' ? 'já enviado.' : 'ainda por enviar (as fotos novas substituem as antigas).');
+      });
+  });
+}
+
+function gravar(serial, grupo, bt) {
+  var extras = { tecnico: localStorage.getItem('tecnico') || '', cliente: el('cliente').value.trim(),
+                 local: el('local').value.trim(), obs: el('obs').value.trim() };
+  var item = { id: Date.now(), serial: serial, grupo: grupo, foto1: fotos[1], foto2: fotos[2],
+               extras: extras, codigos: codigos.slice(), criado: new Date().toLocaleString('pt-PT') };
+  lembrarGrupo(grupo); lembrar('clientes', extras.cliente); desenharClientes();
 
   // 1.º guarda no telemóvel (nunca se perde), depois tenta enviar
   filaGuardar(item).then(function () {
@@ -344,18 +482,38 @@ function mostrarResultado(r, enviado) {
     '<div class="serial">' + esc(r.serial) + '</div><div class="grupo">' + esc(r.grupo || '') + '</div>' +
     (enviado ? '<p>✅ Enviado para o Google Drive (' + r.fotos + ' foto(s)).</p>'
              : '<p><span class="tag">Sem rede</span> Guardado no telemóvel. É enviado automaticamente quando houver ligação.</p>') +
-    (linhas ? '<table>' + linhas + '</table>' : '');
+    (linhas ? (enviado && r.fonte ? '<p class="dica">Lidos por ' + esc(r.fonte) + '. Toque em “Rever” para confirmar ou corrigir.</p>' : '') +
+              '<table>' + linhas + '</table>' : '');
   el('linkFicha').style.display = enviado ? 'block' : 'none';
-  if (enviado) el('linkFicha').href = r.link;
+  el('btRever').style.display = enviado && r.pastaId ? 'block' : 'none';
+  if (enviado) { el('linkFicha').href = r.link; ultimoResultado = r; }
   estado('');
   mostrar('resultado');
 }
 
 function novo() {
   fotos = { 1: null, 2: null }; desenharFotos();
-  el('serial').value = '';   // o grupo fica, porque costuma repetir-se
+  codigos = []; desenharCodigos();
+  el('serial').value = ''; el('obs').value = ''; el('local').value = '';   // grupo e cliente ficam, porque costumam repetir-se
   mostrar('registar');
   el('serial').focus();
+}
+
+function lembrar(chave, v) {
+  if (!v) return;
+  var l = JSON.parse(localStorage.getItem(chave) || '[]').filter(function (x) { return x !== v; });
+  l.unshift(v); localStorage.setItem(chave, JSON.stringify(l.slice(0, 20)));
+}
+function desenharClientes() {
+  el('clientes').innerHTML = JSON.parse(localStorage.getItem('clientes') || '[]')
+    .map(function (g) { return '<option value="' + esc(g) + '">'; }).join('');
+  el('emailsUsados').innerHTML = JSON.parse(localStorage.getItem('emails') || '[]')
+    .map(function (g) { return '<option value="' + esc(g) + '">'; }).join('');
+}
+function desenharTecnico() {
+  var t = localStorage.getItem('tecnico');
+  el('tecInfo').innerHTML = t ? 'Técnico: <b>' + esc(t) + '</b> (mudar em Definições)'
+                              : 'Dica: escreva o seu nome em ⚙️ Definições para aparecer nos registos.';
 }
 
 function lembrarGrupo(g) {
@@ -383,7 +541,32 @@ function carregarLista(forcar) {
   api('listar').then(function (d) { cacheLista = d; desenharLista(); })
     .catch(function (e) { if (abaAtual !== 'pendentes') el('lista').innerHTML = '<div class="vazio">❌ ' + esc(e.message) + '</div>'; });
 }
+function pesquisar() {
+  var q = el('q').value.trim();
+  if (q.length < 2) return;
+  if (!navigator.onLine) { alert('A pesquisa precisa de rede.'); return; }
+  el('abaRes').style.display = ''; el('abaRes').textContent = '🔍 ' + q.slice(0, 10);
+  resultadosPesquisa = null; aba('resultados');
+  el('lista').innerHTML = '<div class="vazio">A pesquisar…</div>';
+  api('pesquisar', { q: q }).then(function (r) { resultadosPesquisa = r.resultados; desenharLista(); })
+    .catch(function (e) { el('lista').innerHTML = '<div class="vazio">❌ ' + esc(e.message) + '</div>'; });
+}
+function linhaServidor(it, estado) {
+  var marcado = selecionados[it.id] ? ' checked' : '';
+  var tag = estado === 'Enviado' ? '<span class="tag ok">Enviado</span>' : estado === 'Por enviar' ? '<span class="tag">Por enviar</span>' : '';
+  return '<div class="item">' +
+    (it.id ? '<input type="checkbox"' + marcado + ' onchange="selecionar(\'' + esc(it.id) + '\',\'' + esc(estado) + '\',this.checked)">' : '') +
+    '<a class="corpo" href="' + esc(it.link) + '" target="_blank" rel="noopener"><div>' +
+      '<div class="s">' + esc(it.serial) + '</div><div class="g">' + esc(it.grupo) + '</div>' +
+      '<div class="m">' + esc([it.modelo, it.cliente].filter(Boolean).join(' · ')) + '</div></div>' +
+      '<div class="dir">' + esc(it.data) + (it.fotos != null ? '<br>📷 ' + it.fotos : '') + (tag ? '<br>' + tag : '') + '</div></a>' +
+    (it.id ? '<button class="ed" title="Rever" onclick="abrirEditar(\'' + esc(it.id) + '\')">✏️</button>' : '') + '</div>';
+}
 function desenharLista() {
+  el('btRelatorio').style.display = abaAtual === 'porEnviar' ? 'block' : 'none';
+  el('btFolha').style.display = cacheLista && cacheLista.folha ? 'block' : 'none';
+  if (cacheLista && cacheLista.folha) el('btFolha').href = cacheLista.folha;
+  desenharSelecao();
   if (abaAtual === 'pendentes') {
     filaTodos().then(function (l) {
       el('lista').innerHTML = l.length ? l.map(function (it) {
@@ -397,14 +580,28 @@ function desenharLista() {
     });
     return;
   }
+  if (abaAtual === 'resultados') {
+    if (!resultadosPesquisa) return;
+    el('lista').innerHTML = resultadosPesquisa.length ? resultadosPesquisa.map(function (it) { return linhaServidor(it, it.estado); }).join('')
+      : '<div class="vazio">Nenhum registo encontrado.</div>';
+    return;
+  }
   if (!cacheLista) { el('lista').innerHTML = '<div class="vazio">' + (navigator.onLine ? 'A carregar…' : 'Sem rede.') + '</div>'; return; }
-  var l = cacheLista[abaAtual] || [];
-  el('lista').innerHTML = l.length ? l.map(function (it) {
-    return '<a class="item" href="' + esc(it.link) + '" target="_blank" rel="noopener"><div>' +
-      '<div class="s">' + esc(it.serial) + '</div><div class="g">' + esc(it.grupo) + '</div>' +
-      '<div class="m">' + esc(it.modelo || '') + '</div></div>' +
-      '<div class="dir">' + esc(it.data) + '<br>📷 ' + it.fotos + '</div></a>';
-  }).join('') : '<div class="vazio">Sem registos.</div>';
+  var l = cacheLista[abaAtual] || [], est = abaAtual === 'porEnviar' ? 'Por enviar' : 'Enviado';
+  el('lista').innerHTML = l.length ? l.map(function (it) { return linhaServidor(it, est); }).join('')
+    : '<div class="vazio">Sem registos.</div>';
+}
+function selecionar(id, estado, sim) {
+  if (sim) selecionados[id] = estado; else delete selecionados[id];
+  desenharSelecao();
+}
+function desenharSelecao() {
+  var ids = Object.keys(selecionados), n = ids.length;
+  el('selbar').style.display = n ? 'flex' : 'none';
+  var porEnviar = ids.filter(function (i) { return selecionados[i] === 'Por enviar'; }).length;
+  el('btSelEnviar').style.display = porEnviar ? '' : 'none';
+  el('btSelEnviar').textContent = '✉️ Enviar (' + porEnviar + ')';
+  el('btSelQR').textContent = '🏷 Etiquetas QR (' + n + ')';
 }
 function repetir(id) {
   filaTodos().then(function (l) {
@@ -416,19 +613,176 @@ function apagar(id) {
   if (!confirm('Apagar este registo do telemóvel? As fotos não foram enviadas.')) return;
   filaApagar(id).then(function () { atualizarBadge(); desenharLista(); });
 }
-function enviarRelatorio(bt) {
-  if (!confirm('Enviar agora o relatório em PDF por email com todos os seriais por enviar?')) return;
-  bt.disabled = true; bt.textContent = 'A enviar… (pode demorar)';
-  processarFila().then(function () { return api('enviarRelatorio'); }).then(function (r) {
-    bt.textContent = r.enviados ? '✔ Relatório enviado (' + r.enviados + ')' : 'Nada para enviar';
-    cacheLista = null; carregarLista(true);
-  }).catch(function (e) { bt.textContent = '❌ ' + e.message; })
-    .then(function () { setTimeout(function () { bt.disabled = false; bt.textContent = '✉️ Enviar relatório agora'; }, 4000); });
+
+/* ---------------- Enviar relatório (escolher registos e emails) ---------------- */
+function abrirEnvio(soSelecionados) {
+  var l = (cacheLista && cacheLista.porEnviar) || [];
+  if (!l.length) { alert('Não há registos por enviar.'); return; }
+  el('envLista').innerHTML = l.map(function (it) {
+    var on = !soSelecionados || selecionados[it.id] === 'Por enviar';
+    return '<label style="display:flex;gap:10px;align-items:center;font-size:15px;color:#222;letter-spacing:0;font-weight:600;margin:8px 0">' +
+      '<input type="checkbox" class="envSel" value="' + esc(it.id) + '"' + (on ? ' checked' : '') + ' style="width:22px;height:22px;flex:none">' +
+      esc(it.serial) + ' <span style="font-weight:400;color:#666">' + esc(it.grupo) + (it.cliente ? ' · ' + esc(it.cliente) : '') + '</span></label>';
+  }).join('');
+  el('envEmails').placeholder = cacheLista.emailPadrao ? 'habitual: ' + cacheLista.emailPadrao : 'destinatários habituais';
+  mostrar('enviar');
 }
+function enviarRelatorio(bt) {
+  var ids = Array.prototype.map.call(document.querySelectorAll('.envSel:checked'), function (c) { return c.value; });
+  if (!ids.length) { alert('Escolha pelo menos um registo.'); return; }
+  var emails = el('envEmails').value.trim();
+  if (emails && emails.split(/[,;\s]+/).some(function (e) { return e && !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(e); })) {
+    alert('Há um email inválido. Use só letras sem acentos, números e . _ -'); return;
+  }
+  bt.disabled = true; bt.textContent = 'A enviar… (pode demorar)';
+  processarFila().then(function () { return api('enviarRelatorio', { ids: ids, emails: emails }); }).then(function (r) {
+    emails.split(/[,;\s]+/).filter(Boolean).forEach(function (e) { lembrar('emails', e); }); desenharClientes();
+    alert(r.enviados ? '✔ Relatório enviado com ' + r.enviados + ' registo(s).' : 'Nada para enviar.');
+    selecionados = {}; cacheLista = null; mostrar('lista'); carregarLista(true);
+  }).catch(function (e) { alert('❌ ' + e.message); })
+    .then(function () { bt.disabled = false; bt.textContent = '✉️ Enviar relatório'; });
+}
+
+/* ---------------- Etiquetas QR ---------------- */
+function etiquetasQR(bt) {
+  var ids = Object.keys(selecionados);
+  if (!ids.length) return;
+  // abre já a janela (o iPhone bloqueia janelas abertas depois de esperar pela rede)
+  var janela = window.open('', '_blank');
+  if (janela) janela.document.write('<p style="font-family:sans-serif;padding:20px">A criar o PDF das etiquetas…</p>');
+  bt.disabled = true; var txt = bt.textContent; bt.textContent = 'A criar PDF…';
+  api('etiquetasQR', { ids: ids }).then(function (r) {
+    if (janela) janela.location = r.url; else location.href = r.url;
+  }).catch(function (e) { if (janela) janela.close(); alert('❌ ' + e.message); })
+    .then(function () { bt.disabled = false; bt.textContent = txt; });
+}
+
+/* ---------------- Rever / corrigir ---------------- */
+function abrirEditar(r) {
+  edVoltar = document.querySelector('.ecra.ativo').id.replace('e-', '');
+  if (typeof r === 'string') {
+    if (!navigator.onLine) { alert('Precisa de rede para rever os dados.'); return; }
+    el('edCab').innerHTML = 'A carregar…'; el('edCampos').innerHTML = ''; mostrar('editar');
+    api('obter', { pastaId: r }).then(desenharEditar).catch(function (e) { el('edCab').innerHTML = '❌ ' + esc(e.message); });
+    return;
+  }
+  mostrar('editar'); desenharEditar(r);
+}
+function desenharEditar(r) {
+  edAtual = r;
+  var x = r.extras || {};
+  el('edCab').innerHTML = '<div class="serial">' + esc(r.serial) + '</div><div class="grupo">' + esc(r.grupo || '') + '</div>' +
+    (r.enviado ? '<p class="dica">Já enviado: a correção fica na ficha e na folha de cálculo.</p>' : '');
+  el('edCliente').value = x.cliente || ''; el('edLocal').value = x.local || '';
+  el('edTecnico').value = x.tecnico || ''; el('edObs').value = x.obs || '';
+  el('edFonte').textContent = r.fonte ? '(lidos por ' + r.fonte + (r.corrigido ? ', já revistos' : '') + ')' : '';
+  el('edFicha').href = r.link || '#';
+  var campos = (r.campos && r.campos.length) ? r.campos : [['Modelo', ''], ['Serial No.', ''], ['EAN No.', '']];
+  el('edCampos').innerHTML = '';
+  campos.forEach(function (c) { edAdicionar(c[0], c[1]); });
+  el('edEstado').textContent = '';
+}
+function edAdicionar(nome, valor) {
+  var d = document.createElement('div'); d.className = 'ed-linha';
+  d.innerHTML = '<input placeholder="Campo"><input placeholder="Valor"><button title="Apagar">✕</button>';
+  d.children[0].value = nome || ''; d.children[1].value = valor || '';
+  d.children[2].onclick = function () { d.remove(); };
+  el('edCampos').appendChild(d);
+  if (!nome) d.children[0].focus();
+}
+function edGuardar(bt) {
+  if (!edAtual) return;
+  var campos = Array.prototype.map.call(el('edCampos').children, function (d) {
+    return [d.children[0].value.trim(), d.children[1].value.trim()];
+  }).filter(function (c) { return c[0] && c[1]; });
+  var extras = { cliente: el('edCliente').value.trim(), local: el('edLocal').value.trim(),
+                 tecnico: el('edTecnico').value.trim(), obs: el('edObs').value.trim() };
+  bt.disabled = true; el('edEstado').textContent = 'A guardar…';
+  api('corrigir', { pastaId: edAtual.pastaId, campos: campos, extras: extras }).then(function (r) {
+    edAtual = r; el('edEstado').textContent = '✅ Correções guardadas.';
+    lembrar('clientes', extras.cliente); desenharClientes(); cacheLista = null;
+  }).catch(function (e) { el('edEstado').textContent = '❌ ' + e.message; })
+    .then(function () { bt.disabled = false; });
+}
+
+/* ---------------- Leitor de códigos de barras ---------------- */
+var scan = { modo: '', leitor: null, stream: null, timer: null, ultimo: '', vezes: 0 };
+function carregarZXing() {
+  if (window.ZXing) return Promise.resolve();
+  return new Promise(function (ok, falha) {
+    var sc = document.createElement('script'); sc.src = 'vendor/zxing.min.js';
+    sc.onload = ok; sc.onerror = function () { falha(new Error('Não foi possível carregar o leitor.')); };
+    document.head.appendChild(sc);
+  });
+}
+function abrirScanner(modo) {
+  scan.modo = modo; scan.ultimo = ''; scan.vezes = 0;
+  el('scanner').style.display = 'flex';
+  el('scanMsg').textContent = modo === 'serial' ? 'Aponte ao código do serial.' : 'Aponte a cada código de barras da etiqueta, um de cada vez.';
+  desenharCodigos();
+  var video = el('scanVideo');
+  var nativo = 'BarcodeDetector' in window;
+  var arranque = nativo ? Promise.resolve() : carregarZXing();
+  arranque.then(function () {
+    return navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+  }).then(function (stream) {
+    scan.stream = stream; video.srcObject = stream; return video.play();
+  }).then(function () {
+    if (nativo) {
+      var det = new BarcodeDetector({ formats: ['code_128', 'ean_13', 'ean_8', 'code_39', 'qr_code', 'data_matrix', 'upc_a', 'itf'] });
+      scan.timer = setInterval(function () {
+        det.detect(video).then(function (l) { l.forEach(function (c) { lido(c.rawValue, c.format); }); }).catch(function () {});
+      }, 250);
+    } else {
+      var hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.CODE_39, ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.ITF]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      scan.leitor = new ZXing.BrowserMultiFormatReader(hints, 200);
+      scan.leitor.decodeFromVideoElementContinuously(video, function (res) {
+        if (res) lido(res.getText(), ZXing.BarcodeFormat[res.getBarcodeFormat()]);
+      });
+    }
+  }).catch(function (e) {
+    el('scanMsg').textContent = '❌ Sem acesso à câmara: ' + (e.message || e.name) + '. Autorize a câmara nas definições do browser.';
+  });
+}
+function lido(texto, formato) {
+  texto = String(texto || '').trim();
+  if (!texto) return;
+  // só aceita depois de ler o mesmo valor 2 vezes seguidas (evita leituras erradas)
+  if (texto === scan.ultimo) scan.vezes++; else { scan.ultimo = texto; scan.vezes = 1; }
+  if (scan.vezes < 2) return;
+  if (scan.modo === 'serial') {
+    el('serial').value = texto.toUpperCase().replace(/[^A-Z0-9./]/g, '').slice(0, 30);
+    if (navigator.vibrate) navigator.vibrate(80);
+    fecharScanner(); return;
+  }
+  if (codigos.some(function (c) { return c.texto === texto; })) return;
+  codigos.push({ texto: texto, formato: String(formato || '').toUpperCase() });
+  if (navigator.vibrate) navigator.vibrate(80);
+  el('scanMsg').textContent = '✔ Lido: ' + texto + '. Aponte ao próximo ou toque em Concluir.';
+  desenharCodigos();
+}
+function fecharScanner() {
+  if (scan.timer) clearInterval(scan.timer);
+  if (scan.leitor) { try { scan.leitor.reset(); } catch (e) {} }
+  if (scan.stream) scan.stream.getTracks().forEach(function (t) { t.stop(); });
+  scan.timer = scan.leitor = scan.stream = null;
+  el('scanVideo').srcObject = null;
+  el('scanner').style.display = 'none';
+}
+function desenharCodigos() {
+  var h = codigos.map(function (c, i) { return '<span class="chip">' + esc(c.texto) + '<b onclick="removerCodigo(' + i + ')">✕</b></span>'; }).join('');
+  el('chipsCod').innerHTML = h || '<span class="dica" style="margin:0">Nenhum código lido.</span>';
+  el('scanChips').innerHTML = h;
+}
+function removerCodigo(i) { codigos.splice(i, 1); desenharCodigos(); }
 
 /* ---------------- Definições ---------------- */
 function guardarCfg(bt) {
   var url = el('cfgUrl').value.trim(), pin = el('cfgPin').value.trim();
+  localStorage.setItem('tecnico', el('cfgTecnico').value.trim()); desenharTecnico();
   if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) { el('cfgEstado').textContent = '❌ O URL tem de começar por https://script.google.com/ e terminar em /exec'; return; }
   cfg.url = url; cfg.pin = pin;
   bt.disabled = true; el('cfgEstado').textContent = 'A testar…';
@@ -460,8 +814,8 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 
 /* ---------------- Arranque ---------------- */
 el('versao').textContent = VERSAO;
-el('cfgUrl').value = cfg.url; el('cfgPin').value = cfg.pin;
-desenharGrupos(); atualizarRede(); atualizarBadge();
+el('cfgUrl').value = cfg.url; el('cfgPin').value = cfg.pin; el('cfgTecnico').value = localStorage.getItem('tecnico') || '';
+desenharGrupos(); desenharClientes(); desenharTecnico(); desenharCodigos(); atualizarRede(); atualizarBadge();
 mostrar('registar');
 </script>
 </body>

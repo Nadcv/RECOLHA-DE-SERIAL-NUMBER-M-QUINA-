@@ -85,15 +85,22 @@ const CONFIG = {
 /* ===================== FUNÇÃO PRINCIPAL ===================== */
 
 function enviarRelatorio() {
+  return enviarRelatorioPara_();
+}
+
+function enviarRelatorioPara_(ids, emails) {
   // Evita dois envios ao mesmo tempo (app + agendamento)
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) throw new Error('Já está a ser enviado um relatório. Tente daqui a pouco.');
-  try { return enviarRelatorio__(); } finally { lock.releaseLock(); }
+  try { return enviarRelatorio__(ids, emails); } finally { lock.releaseLock(); }
 }
 
-function enviarRelatorio__() {
+/** ids: só estas pastas (vazio = todas por enviar); emails: destinatários (vazio = EMAIL_DESTINO). */
+function enviarRelatorio__(ids, emails) {
   const pasta = DriveApp.getFolderById(CONFIG.PASTA_ID);
-  const itens = lerSubpastas_(pasta);
+  let itens = lerSubpastas_(pasta);
+  if (ids && ids.length) itens = itens.filter(it => ids.indexOf(it.pasta.getId()) >= 0);
+  const para = (emails && String(emails).trim()) ? String(emails).trim() : CONFIG.EMAIL_DESTINO;
 
   if (itens.length === 0) {
     Logger.log('Nenhuma subpasta com fotos para enviar.');
@@ -110,15 +117,15 @@ function enviarRelatorio__() {
   body.clear();
 
   itens.forEach((item, i) => {
-    if (CONFIG.USAR_OCR) {
-      // reaproveita a leitura feita no registo (evita ler duas vezes)
-      let info = {};
-      try { info = JSON.parse(item.pasta.getDescription() || '{}'); } catch (e) {}
-      // se no registo só deu OCR (ex.: limite da IA esgotado), tenta de novo com IA
-      const r = (info.campos && info.campos.length && info.nFotos === item.fotos.length &&
-                 (info.fonte === 'IA' || !geminiDisponivel_()))
-        ? { dados: info.dados || {}, campos: info.campos, texto: info.texto || '', fonte: info.fonte }
-        : analisarEtiquetas_(item.fotos);
+    const info = lerInfo_(item.pasta);
+    Object.assign(item, { extras: info.extras || {}, codigos: info.codigos || [], registadoEm: info.registadoEm,
+                          corrigido: !!info.corrigido, dados: info.dados || {}, campos: info.campos || [],
+                          textoOCR: info.texto || '', fonte: info.fonte });
+    // reaproveita a leitura feita no registo; se só deu OCR (ex.: limite da IA esgotado), tenta de novo com IA
+    const reaproveitar = info.corrigido || (info.campos && info.campos.length && info.nFotos === item.fotos.length &&
+                                            (info.fonte === 'IA' || !geminiDisponivel_()));
+    if (CONFIG.USAR_OCR && !reaproveitar) {
+      const r = aplicarCodigos_(analisarEtiquetas_(item.fotos), item.codigos);
       Object.assign(item, { dados: r.dados, campos: r.campos, textoOCR: r.texto, fonte: r.fonte });
     }
     if (CONFIG.GERAR_QR) prepararQR_(item);
@@ -139,7 +146,7 @@ function enviarRelatorio__() {
 
   // 3) Enviar email
   MailApp.sendEmail({
-    to: CONFIG.EMAIL_DESTINO,
+    to: para,
     subject: `${CONFIG.ASSUNTO} – ${itens.length} serial(is) – ${data}`,
     htmlBody: corpoEmail_(itens),
     attachments: [pdf],
@@ -155,8 +162,13 @@ function enviarRelatorio__() {
     const enviados = obterOuCriarPasta_(pasta, 'Enviados');
     itens.forEach(it => it.pasta.moveTo(enviados));
   }
+  const quando = agora_();
+  itens.forEach(it => {
+    try { it.enviadoEm = quando; guardarDadosNaPasta_(it); registarNaFolha_(it.pasta, 'Enviado'); }
+    catch (e) { Logger.log('Folha: ' + e.message); }
+  });
 
-  Logger.log(`Enviado: ${itens.length} serial(is) para ${CONFIG.EMAIL_DESTINO}`);
+  Logger.log(`Enviado: ${itens.length} serial(is) para ${para}`);
   return itens.length;
 }
 
@@ -168,7 +180,7 @@ function lerSubpastas_(pasta) {
   while (subs.hasNext()) {
     const sub = subs.next();
     const nomePasta = sub.getName();
-    if (nomePasta === 'Enviados') continue;
+    if (pastaDeSistema_(nomePasta)) continue;
 
     // "162744 - 30 VE"  ->  serial = 162744 , grupo = 30 VE
     const partes = nomePasta.split(/\s*[-–_]\s*/);
@@ -255,13 +267,15 @@ function montarFolhaDados_(body, item) {
   titulo.editAsText().setBold(true).setFontSize(15).setForegroundColor('#000000');
   titulo.setSpacingBefore(0).setSpacingAfter(4);
   const sub = body.appendParagraph(`Serial ${item.serial}  ·  Grupo ${item.grupo || '—'}` +
-                                   (item.enviadoEm ? `  ·  ${item.enviadoEm}` : ''));
+                                   (item.registadoEm ? `  ·  Registado em ${item.registadoEm}` : ''));
   sub.editAsText().setBold(false).setFontSize(10).setForegroundColor('#555555');
   sub.setSpacingAfter(10);
 
   const lidos = (item.campos && item.campos.length) ? item.campos
     : CAMPOS_ETIQUETA_.map(([k, nome]) => [nome, d[k] || '—']);
+  const x = item.extras || {};
   const linhas = [['SERIAL NO', item.serial || '—'], ['INFORMAÇÃO DO GRUPO', item.grupo || '—']]
+    .concat([['Cliente / Obra', x.cliente], ['Local', x.local], ['Técnico', x.tecnico]].filter(l => l[1]))
     .concat(lidos.map(([n, v]) => [String(n), String(v || '—')]));
   const t = body.appendTable(linhas);
   t.setBorderWidth(1).setBorderColor('#999999');
@@ -276,10 +290,18 @@ function montarFolhaDados_(body, item) {
 
   const nLidos = lidos.filter(l => l[1] && l[1] !== '—').length;
   const nota = body.appendParagraph(nLidos
-    ? `${nLidos} campos lidos automaticamente ${item.fonte === 'IA' ? 'por IA' : 'por OCR'}. Confirme com as fotos da folha anterior.`
+    ? `${nLidos} campos lidos automaticamente ${item.fonte === 'IA' ? 'por IA' : 'por OCR'}` +
+      (item.corrigido ? ' e revistos pelo técnico.' : '. Confirme com as fotos da folha anterior.')
     : 'Não foi possível ler dados nas fotos. Tire as fotos de perto, direitas e com boa luz.');
   nota.editAsText().setBold(false).setFontSize(9).setForegroundColor('#777777');
   nota.setSpacingBefore(8);
+
+  if (x.obs) {
+    const h = body.appendParagraph('Observações');
+    h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
+    h.setSpacingBefore(14).setSpacingAfter(2);
+    body.appendParagraph(x.obs).editAsText().setBold(false).setFontSize(10).setForegroundColor('#222222');
+  }
 
   if (item.fonte !== 'IA' && item.textoOCR && item.textoOCR.trim()) {
     const h = body.appendParagraph('Texto completo lido nas fotos');
@@ -377,13 +399,33 @@ function prepararQR_(item) {
   }
 }
 
+function lerInfo_(pasta) {
+  try { return JSON.parse(pasta.getDescription() || '{}'); } catch (e) { return {}; }
+}
+function agora_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
+}
+
+/** Guarda os dados do serial na descrição da pasta (junta com o que já lá estava). */
 function guardarDadosNaPasta_(item) {
-  item.enviadoEm = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
-  item.pasta.setDescription(JSON.stringify({
-    serial: item.serial, grupo: item.grupo, dados: item.dados || {}, enviadoEm: item.enviadoEm,
-    campos: (item.campos || []).slice(0, 60), fonte: item.fonte || '',
-    texto: (item.textoOCR || '').slice(0, 3000), nFotos: item.fotos ? item.fotos.length : undefined,
-  }));
+  const info = lerInfo_(item.pasta);
+  if (!info.registadoEm) info.registadoEm = info.enviadoEm || agora_();
+  item.registadoEm = info.registadoEm;
+  Object.assign(info, { serial: item.serial, grupo: item.grupo });
+  if (item.dados) info.dados = item.dados;
+  if (item.campos) info.campos = item.campos.slice(0, 60);
+  if (item.fonte !== undefined) info.fonte = item.fonte;
+  if (item.textoOCR !== undefined) info.texto = (item.textoOCR || '').slice(0, 1500);
+  if (item.fotos) info.nFotos = item.fotos.length;
+  if (item.extras) info.extras = item.extras;
+  if (item.codigos) info.codigos = item.codigos;
+  if (item.corrigido) info.corrigido = true;
+  if (item.enviadoEm) info.enviadoEm = item.enviadoEm;
+  let json = JSON.stringify(info);
+  if (json.length > 4000) { info.texto = ''; json = JSON.stringify(info); }
+  while (json.length > 4000 && info.campos && info.campos.length) { info.campos.pop(); json = JSON.stringify(info); }
+  item.pasta.setDescription(json);
+  return info;
 }
 
 /** Cria Ficha_<serial>.pdf dentro da pasta do serial (substitui a anterior). */
@@ -624,16 +666,20 @@ function camposDoOCR_(t, dados) {
 
 function corpoEmail_(itens) {
   const linhas = itens.map(it => {
-    const d = it.dados || {};
-    const serial = it.link ? `<a href="${it.link}">${it.serial}</a>` : it.serial;
-    return `<tr><td>${serial}</td><td>${it.grupo || ''}</td><td>${d.modelo || ''}</td>` +
-           `<td>${d.serial || ''}</td><td>${it.fotos.length}</td></tr>`;
+    const d = it.dados || {}, x = it.extras || {};
+    const serial = it.link ? `<a href="${it.link}">${esc_(it.serial)}</a>` : esc_(it.serial);
+    return `<tr><td>${serial}</td><td>${esc_(it.grupo || '')}</td><td>${esc_(x.cliente || '')}</td>` +
+           `<td>${esc_(d.modelo || '')}</td><td>${esc_(d.serial || '')}</td><td>${esc_(x.tecnico || '')}</td>` +
+           `<td>${it.fotos.length}</td></tr>`;
   }).join('');
+  let folha = '';
+  try { folha = folhaUrl_(); } catch (e) {}
   return `<p>Olá,</p><p>Segue em anexo o relatório em PDF com ${itens.length} serial(is).</p>
     <table border="1" cellpadding="6" style="border-collapse:collapse;font-family:Arial;font-size:13px">
-      <tr style="background:#eee"><th>Serial</th><th>Grupo</th><th>Modelo</th><th>Serial etiqueta</th><th>Fotos</th></tr>
-      ${linhas}
-    </table><p>Enviado automaticamente.</p>`;
+      <tr style="background:#eee"><th>Serial</th><th>Grupo</th><th>Cliente / Obra</th><th>Modelo</th>
+      <th>Serial etiqueta</th><th>Técnico</th><th>Fotos</th></tr>${linhas}</table>
+    ${folha ? `<p><a href="${folha}">📊 Ver o histórico completo na folha de cálculo</a></p>` : ''}
+    <p style="color:#888;font-size:12px">Cada serial tem um link para a ficha (fotos e dados).</p>`;
 }
 
 /* ===================== UTILITÁRIOS ===================== */
@@ -653,6 +699,8 @@ function autorizar() {
   MailApp.getRemainingDailyQuota();
   UrlFetchApp.fetch('https://api.qrserver.com/v1/create-qr-code/?size=50x50&data=teste');
   criarAgendamentoDiario();
+  const folha = folha_();   // cria a folha de cálculo (e preenche com os registos que já existem)
+  Logger.log('📊 Folha de cálculo: ' + folha.getUrl());
   Logger.log('✅ Autorizado. Pasta: ' + DriveApp.getFolderById(CONFIG.PASTA_ID).getName() +
              ' | Email: ' + CONFIG.EMAIL_DESTINO + ' | URL: ' + ScriptApp.getService().getUrl());
 }
@@ -720,14 +768,16 @@ function doGet(e) {
       <div class="rotulo">INFORMAÇÃO DO GRUPO</div>
       <div class="grupo">${esc_(info.grupo || '—')}</div>
     </div>
-    ${linhas ? `<div class="card"><div class="rotulo">DADOS DA ETIQUETA</div><table>${linhas}</table></div>` : ''}
+    ${extrasHtml_(info.extras)}
+    ${linhas ? `<div class="card"><div class="rotulo">DADOS DA ETIQUETA${info.fonte ? ' <small>· lidos por ' + esc_(info.fonte) + (info.corrigido ? ', revistos' : '') + '</small>' : ''}</div><table>${linhas}</table></div>` : ''}
     <div class="card">
       <div class="rotulo">FOTOS (${fotos.length}) <small>· toque para ampliar</small></div>
       ${imgs || '<p>Sem fotos.</p>'}
     </div>
     ${fichaUrl ? `<a class="botao" href="${fichaUrl}" target="_blank">📄 Ficha em PDF</a>` : ''}
     <a class="botao sec" href="${pasta.getUrl()}" target="_blank">📁 Abrir pasta no Drive</a>
-    <footer>${info.enviadoEm ? 'Registado em ' + esc_(info.enviadoEm) : ''}</footer>`;
+    <footer>${info.registadoEm || info.enviadoEm ? 'Registado em ' + esc_(info.registadoEm || info.enviadoEm) : ''}
+            ${info.enviadoEm && info.registadoEm ? ' · Enviado em ' + esc_(info.enviadoEm) : ''}</footer>`;
   return paginaHtml_(html, 'Serial ' + info.serial);
 }
 
@@ -787,7 +837,7 @@ function testarPagina() {
   const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
   let it = pasta.getFolders();
   let sub = null;
-  while (it.hasNext()) { const f = it.next(); if (f.getName() !== 'Enviados') { sub = f; break; } }
+  while (it.hasNext()) { const f = it.next(); if (!pastaDeSistema_(f.getName())) { sub = f; break; } }
   if (!sub) { const env = pasta.getFoldersByName('Enviados'); if (env.hasNext()) { it = env.next().getFolders(); if (it.hasNext()) sub = it.next(); } }
   Logger.log(sub ? `${webApp}?id=${sub.getId()}` : 'Sem subpastas.');
 }
@@ -845,12 +895,13 @@ function formEnviarFoto(pin, pastaId, base64, slot) {
 }
 
 /** Chamado no fim: OCR (opcional), guarda os dados e devolve o link da ficha. */
-function formFinalizar(pin, pastaId) {
+function formFinalizar(pin, pastaId, extras, codigos) {
   verificarPin_(pin);
   const pasta = DriveApp.getFolderById(pastaId);
   if (!pastaPertenceAoRelatorio_(pasta)) throw new Error('Pasta inválida.');
   const partes = pasta.getName().split(/\s*[-–_]\s*/);
-  const item = { pasta, serial: partes.shift(), grupo: partes.join(' '), dados: {}, campos: [] };
+  const item = { pasta, serial: partes.shift(), grupo: partes.join(' '), dados: {}, campos: [],
+                 extras: limparExtras_(extras), codigos: limparCodigos_(codigos) };
 
   const fotos = [];
   const files = pasta.getFiles();
@@ -861,9 +912,14 @@ function formFinalizar(pin, pastaId) {
       Object.assign(item, { dados: r.dados, campos: r.campos, textoOCR: r.texto, fonte: r.fonte, fotos });
     } catch (e) { Logger.log('Leitura falhou: ' + e.message); }
   }
+  const rc = aplicarCodigos_({ dados: item.dados, campos: item.campos, texto: item.textoOCR, fonte: item.fonte }, item.codigos);
+  Object.assign(item, { dados: rc.dados, campos: rc.campos });
+  item.fotos = fotos;
   guardarDadosNaPasta_(item);
+  try { registarNaFolha_(pasta, 'Por enviar'); } catch (e) { Logger.log('Folha: ' + e.message); }
   const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
-  return { link: webApp + '?id=' + pastaId, serial: item.serial, grupo: item.grupo, dados: item.dados, campos: item.campos, fotos: fotos.length };
+  return { link: webApp + '?id=' + pastaId, serial: item.serial, grupo: item.grupo, dados: item.dados, campos: item.campos, fotos: fotos.length,
+           pastaId, extras: item.extras, fonte: item.fonte || '' };
 }
 
 /** Botão "Enviar relatório agora" do formulário. */
@@ -899,9 +955,15 @@ function doPost(e) {
       case 'ping':            verificarPin_(pin); data = { titulo: CONFIG.TITULO_PAGINA }; break;
       case 'criarPasta':      data = formCriarPasta(pin, req.serial, req.grupo); break;
       case 'enviarFoto':      data = formEnviarFoto(pin, req.pastaId, req.base64, req.slot); break;
-      case 'finalizar':       data = formFinalizar(pin, req.pastaId); break;
-      case 'enviarRelatorio': data = { enviados: formEnviarRelatorio(pin) }; break;
+      case 'finalizar':       data = formFinalizar(pin, req.pastaId, req.extras, req.codigos); break;
+      case 'enviarRelatorio': verificarPin_(pin);
+                              data = { enviados: enviarRelatorioPara_(req.ids, validarEmails_(req.emails)) }; break;
       case 'listar':          data = apiListar_(pin); break;
+      case 'verificar':       verificarPin_(pin); data = apiVerificar_(req.serial); break;
+      case 'pesquisar':       verificarPin_(pin); data = apiPesquisar_(req.q); break;
+      case 'obter':           verificarPin_(pin); data = apiObter_(req.pastaId); break;
+      case 'corrigir':        verificarPin_(pin); data = apiCorrigir_(req.pastaId, req.campos, req.extras); break;
+      case 'etiquetasQR':     verificarPin_(pin); data = apiEtiquetasQR_(req.ids); break;
       default: throw new Error('Ação desconhecida.');
     }
     resposta = { ok: true, data };
@@ -926,7 +988,8 @@ function apiListar_(pin) {
     while (files.hasNext()) if (files.next().getMimeType().indexOf('image/') === 0) fotos++;
     return {
       serial: info.serial || partes[0], grupo: info.grupo || partes.slice(1).join(' '),
-      modelo: (info.dados || {}).modelo || '', fotos,
+      modelo: (info.dados || {}).modelo || '', fotos, id: pasta.getId(),
+      cliente: (info.extras || {}).cliente || '', fonte: info.fonte || '', corrigido: !!info.corrigido,
       data: Utilities.formatDate(pasta.getLastUpdated(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm'),
       link: webApp + '?id=' + pasta.getId(), _t: pasta.getLastUpdated().getTime(),
     };
@@ -942,10 +1005,12 @@ function apiListar_(pin) {
       while (env.hasNext()) todas.push(env.next());
       todas.sort((a, b) => b.getLastUpdated() - a.getLastUpdated());
       todas.slice(0, 30).forEach(p => enviados.push(ler(p)));
-    } else {
+    } else if (!pastaDeSistema_(f.getName())) {
       porEnviar.push(ler(f));
     }
   }
   porEnviar.sort((a, b) => b._t - a._t);
-  return { porEnviar, enviados };
+  let folha = '';
+  try { folha = folhaUrl_(); } catch (e) {}
+  return { porEnviar, enviados, folha, emailPadrao: CONFIG.EMAIL_DESTINO };
 }
