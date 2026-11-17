@@ -3,6 +3,7 @@
 #   CLASPRC_JSON   conteúdo do ficheiro ~/.clasprc.json (login do clasp)
 #   PASTA_ID       ID da pasta do Google Drive
 #   EMAIL_DESTINO  email(s) que recebem o relatório
+#   GEMINI_API_KEY (opcional) chave de aistudio.google.com para ler tudo das etiquetas com IA
 #   CODIGO_ACESSO  PIN da aplicação
 #   SCRIPT_ID      (depois da 1.ª publicação) ID do projeto Apps Script
 #   DEPLOYMENT_ID  (depois da 1.ª publicação) ID da implementação da Aplicação Web
@@ -56,6 +57,7 @@ jobs:
           EMAIL_DESTINO: ${{ secrets.EMAIL_DESTINO }}
           CODIGO_ACESSO: ${{ secrets.CODIGO_ACESSO }}
           WEB_APP_URL: ${{ secrets.WEB_APP_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           node -e '
             // tira espaços e "Enter" colados por engano nos Secrets
@@ -63,6 +65,7 @@ jobs:
             const s = { PASTA_ID: v("PASTA_ID"), EMAIL_DESTINO: v("EMAIL_DESTINO"),
                         CODIGO_ACESSO: v("CODIGO_ACESSO") };
             if (v("WEB_APP_URL")) s.WEB_APP_URL = v("WEB_APP_URL");
+            if (v("GEMINI_API_KEY")) s.GEMINI_API_KEY = v("GEMINI_API_KEY");
             require("fs").writeFileSync("apps-script/Segredos.gs",
               "// Gerado pelo GitHub Actions a partir dos Secrets. Não editar.\nObject.assign(CONFIG, " +
               JSON.stringify(s, null, 2) + ");\n");

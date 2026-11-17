@@ -1,6 +1,6 @@
 // Guarda a aplicação no telemóvel para abrir mesmo sem rede.
 // Ao mudar algum ficheiro, aumentar a versão abaixo.
-const CACHE = 'seriais-v1.0.0';
+const CACHE = 'seriais-v1.1.0';
 const FICHEIROS = ['./', './index.html', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 

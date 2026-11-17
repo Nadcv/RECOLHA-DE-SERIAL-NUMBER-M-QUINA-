@@ -74,7 +74,9 @@ const CONFIG = {
   QR_LINK_PUBLICO: false,                   // só para QR_DESTINO 'pasta': true = qualquer pessoa vê a pasta
   GUARDAR_FICHA_NA_PASTA: true,             // guarda "Ficha_<serial>.pdf" dentro da pasta do serial
   // Molduras da folha (pontos; A4 útil ≈ 515 x 770)
-  FOLHA_DADOS: true,                        // 2.ª folha com os dados lidos nas fotos
+  FOLHA_DADOS: true,
+  GEMINI_API_KEY: '',                       // chave grátis em aistudio.google.com: lê TUDO das etiquetas com IA
+  GEMINI_MODELO: '',                        // vazio = escolhe automaticamente o modelo "flash" mais recente                        // 2.ª folha com os dados lidos nas fotos
   MOLDURA1: { largura: 400, altura: 265 },  // Foto 1 – etiqueta grande (placa de características)
   MOLDURA2: { largura: 515, altura: 185 },  // Foto 2 – etiqueta pequena (código de barras)
 };
@@ -108,8 +110,13 @@ function enviarRelatorio__() {
 
   itens.forEach((item, i) => {
     if (CONFIG.USAR_OCR) {
-      item.textoOCR = lerTextoOCR_(item.fotos);
-      item.dados = extrairDados_(item.textoOCR);
+      // reaproveita a leitura feita no registo (evita ler duas vezes)
+      let info = {};
+      try { info = JSON.parse(item.pasta.getDescription() || '{}'); } catch (e) {}
+      const r = (info.campos && info.campos.length && info.nFotos === item.fotos.length)
+        ? { dados: info.dados || {}, campos: info.campos, texto: info.texto || '', fonte: info.fonte }
+        : analisarEtiquetas_(item.fotos);
+      Object.assign(item, { dados: r.dados, campos: r.campos, textoOCR: r.texto, fonte: r.fonte });
     }
     if (CONFIG.GERAR_QR) prepararQR_(item);
     montarPagina_(body, item);
@@ -249,8 +256,10 @@ function montarFolhaDados_(body, item) {
   sub.editAsText().setBold(false).setFontSize(10).setForegroundColor('#555555');
   sub.setSpacingAfter(10);
 
+  const lidos = (item.campos && item.campos.length) ? item.campos
+    : CAMPOS_ETIQUETA_.map(([k, nome]) => [nome, d[k] || '—']);
   const linhas = [['SERIAL NO', item.serial || '—'], ['INFORMAÇÃO DO GRUPO', item.grupo || '—']]
-    .concat(CAMPOS_ETIQUETA_.map(([k, nome]) => [nome, d[k] || '—']));
+    .concat(lidos.map(([n, v]) => [String(n), String(v || '—')]));
   const t = body.appendTable(linhas);
   t.setBorderWidth(1).setBorderColor('#999999');
   for (let r = 0; r < t.getNumRows(); r++) {
@@ -262,14 +271,14 @@ function montarFolhaDados_(body, item) {
     c1.editAsText().setBold(!vazio).setFontSize(11).setForegroundColor(vazio ? '#aaaaaa' : '#1a3d8f');
   }
 
-  const nLidos = CAMPOS_ETIQUETA_.filter(([k]) => d[k]).length;
+  const nLidos = lidos.filter(l => l[1] && l[1] !== '—').length;
   const nota = body.appendParagraph(nLidos
-    ? `Lidos automaticamente ${nLidos} de ${CAMPOS_ETIQUETA_.length} campos. Confirme com as fotos da folha anterior.`
+    ? `${nLidos} campos lidos automaticamente ${item.fonte === 'IA' ? 'por IA' : 'por OCR'}. Confirme com as fotos da folha anterior.`
     : 'Não foi possível ler dados nas fotos. Tire as fotos de perto, direitas e com boa luz.');
   nota.editAsText().setBold(false).setFontSize(9).setForegroundColor('#777777');
   nota.setSpacingBefore(8);
 
-  if (item.textoOCR && item.textoOCR.trim()) {
+  if (item.fonte !== 'IA' && item.textoOCR && item.textoOCR.trim()) {
     const h = body.appendParagraph('Texto completo lido nas fotos');
     h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
     h.setSpacingBefore(16).setSpacingAfter(4);
@@ -369,6 +378,8 @@ function guardarDadosNaPasta_(item) {
   item.enviadoEm = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
   item.pasta.setDescription(JSON.stringify({
     serial: item.serial, grupo: item.grupo, dados: item.dados || {}, enviadoEm: item.enviadoEm,
+    campos: (item.campos || []).slice(0, 60), fonte: item.fonte || '',
+    texto: (item.textoOCR || '').slice(0, 3000), nFotos: item.fotos ? item.fotos.length : undefined,
   }));
 }
 
@@ -411,9 +422,89 @@ function blobImagem_(file) {
 
 /* ===================== OCR DA ETIQUETA ===================== */
 
-function lerEtiquetaOCR_(fotos) {
-  return extrairDados_(lerTextoOCR_(fotos));
+/**
+ * Lê as etiquetas. Com GEMINI_API_KEY usa IA (lê todos os campos, mesmo desalinhados);
+ * sem chave (ou se falhar) usa o OCR do Google Drive + reconhecimento dos campos conhecidos.
+ * Devolve { dados: {modelo, codigo, ...}, campos: [[nome, valor], ...], texto, fonte }.
+ */
+function analisarEtiquetas_(fotos) {
+  fotos = escolherFotos_(fotos).filter(Boolean);
+  if (!fotos.length) return { dados: {}, campos: [], texto: '', fonte: '' };
+  if (CONFIG.GEMINI_API_KEY) {
+    try { return lerComGemini_(fotos); } catch (e) { Logger.log('Gemini falhou: ' + e.message); }
+  }
+  const texto = lerTextoOCR_(fotos);
+  const dados = extrairDados_(texto);
+  return { dados, campos: camposDoOCR_(texto, dados), texto, fonte: 'OCR' };
 }
+
+function lerEtiquetaOCR_(fotos) {
+  return analisarEtiquetas_(fotos).dados;
+}
+
+/* ---------- IA (Gemini) ---------- */
+
+function modeloGemini_() {
+  if (CONFIG.GEMINI_MODELO) return CONFIG.GEMINI_MODELO;
+  const cache = CacheService.getScriptCache();
+  const guardado = cache.get('gemini_modelo');
+  if (guardado) return guardado;
+  const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=' +
+                                encodeURIComponent(CONFIG.GEMINI_API_KEY), { muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) throw new Error('Chave Gemini inválida (' + res.getResponseCode() + ')');
+  const nomes = (JSON.parse(res.getContentText()).models || [])
+    .filter(m => (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0)
+    .map(m => m.name.replace('models/', ''))
+    .filter(n => /flash/.test(n) && !/lite|image|tts|audio|live|thinking|exp|preview/.test(n));
+  const versao = n => { const v = n.match(/(\d+(?:\.\d+)?)/); return v ? parseFloat(v[1]) : 0; };
+  nomes.sort((a, b) => versao(b) - versao(a) || a.length - b.length);
+  const escolhido = nomes[0] || 'gemini-2.5-flash';
+  cache.put('gemini_modelo', escolhido, 21600);
+  return escolhido;
+}
+
+function lerComGemini_(fotos) {
+  const pedido = `Estas fotos são etiquetas (placa de características e etiqueta de código de barras) de um compressor / grupo condensador.
+Transcreve TODOS os campos e valores visíveis, exatamente como aparecem, sem inventar nada.
+- Usa o nome do campo como está na etiqueta (ex.: "Serial No.", "EAN No.", "PS HP", "LRA", "Year of Mfg.", "Group 1").
+- Na placa os valores podem estar desalinhados em relação aos nomes: associa cada valor ao campo certo pelo sentido (bar = pressão, A = corrente, °C = temperatura, V/Hz = tensão).
+- Inclui também a linha do modelo, o código, fabricante, país de origem, classe do refrigerante (ex.: A2L) e marcações (CE, UKCA, IP...).
+- Não repitas campos iguais das duas etiquetas; se os valores forem diferentes, indica os dois.
+Responde só com JSON neste formato:
+{"campos":[{"campo":"...","valor":"..."}],"modelo":"","codigo":"","serial":"","ean":"","voltagem":"","refrigerante":"","ano":""}`;
+  const partes = [{ text: pedido }];
+  fotos.forEach(f => {
+    const b = blobImagem_(f);
+    partes.push({ inline_data: { mime_type: b.getContentType() || 'image/jpeg', data: Utilities.base64Encode(b.getBytes()) } });
+  });
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modeloGemini_() +
+              ':generateContent?key=' + encodeURIComponent(CONFIG.GEMINI_API_KEY);
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({
+      contents: [{ role: 'user', parts: partes }],
+      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+    }),
+  });
+  if (res.getResponseCode() !== 200) {
+    CacheService.getScriptCache().remove('gemini_modelo');
+    throw new Error('HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300));
+  }
+  const cand = (JSON.parse(res.getContentText()).candidates || [])[0];
+  const txt = cand && cand.content && cand.content.parts ? cand.content.parts.map(p => p.text || '').join('') : '';
+  const j = JSON.parse(txt.replace(/^```(?:json)?|```$/g, '').trim());
+  const campos = (j.campos || [])
+    .map(c => [String(c.campo || '').trim(), String(c.valor || '').trim()])
+    .filter(c => c[0] && c[1]);
+  const dados = {};
+  ['modelo', 'codigo', 'serial', 'ean', 'voltagem', 'refrigerante', 'ano'].forEach(k => {
+    if (j[k]) dados[k] = String(j[k]).trim();
+  });
+  const texto = campos.map(c => c[0] + ': ' + c[1]).join('\n');
+  return { dados, campos, texto, fonte: 'IA' };
+}
+
+/* ---------- OCR (sem chave) ---------- */
 
 function lerTextoOCR_(fotos) {
   let texto = '';
@@ -434,6 +525,7 @@ function lerTextoOCR_(fotos) {
 }
 
 function extrairDados_(t) {
+  t = t || '';
   const m = (re, g = 1) => { const r = t.match(re); return r ? r[g].trim() : ''; };
   const d = {
     modelo: m(/\b(OP-[A-Z0-9]{6,})/),
@@ -442,10 +534,54 @@ function extrairDados_(t) {
     ean: m(/\b(\d{13})\b/),
     voltagem: m(/(\d{3}\s*V\s*\d?N?\s*~\s*\d{2}\s*Hz)/i),
     ano: m(/Year\s*of\s*Mfg\.?\s*[:\s]*(\d{4})/i) || m(/\b(20[2-3]\d)\b/),
-    refrigerante: m(/(R\d{3,4}[a-z]{0,2}(?:\/R\d{3,4}[A-Z]?)?)/),
+    refrigerante: (t.match(/\bR\d{3,4}[A-Za-z]{0,2}(?:\/R\d{3,4}[A-Za-z]{0,2})?\b/g) || [])
+                    .filter((v, i, a) => a.indexOf(v) === i).join(' · '),
   };
   Object.keys(d).forEach(k => { if (!d[k]) delete d[k]; });
   return d;
+}
+
+/** Todos os campos que se conseguem reconhecer no texto do OCR (etiquetas Danfoss e semelhantes). */
+function camposDoOCR_(t, dados) {
+  t = t || '';
+  const c = [];
+  const add = (nome, v) => { v = (v || '').replace(/\s+/g, ' ').trim(); if (v && !c.some(x => x[0] === nome)) c.push([nome, v]); };
+  const m = (re, g = 1) => { const r = t.match(re); return r ? r[g] : ''; };
+  const todos = re => (t.match(re) || []).map(s => s.replace(/\s+/g, ' ').trim()).filter((v, i, a) => a.indexOf(v) === i);
+
+  add('Modelo', dados.modelo);
+  add('Código', dados.codigo);
+  add('Serial No.', dados.serial || m(/Serial\s*No\.?\s*[:\-.]*\s*([A-Z0-9]{8,})/i));
+  add('EAN No.', dados.ean);
+  add('Voltage', dados.voltagem || m(/(\d{3}(?:-\d{3})?\s*V\s*\d?\s*N?\s*~\s*\d{2}\s*Hz)/i));
+  add('Fluid Group', m(/Fluid\s*Group[ \t]*[:\-]?[ \t]*(\d[ \t]*(?:&|e|,)[ \t]*\d|\d)\b/i) ||
+                     (/Fluid\s*Group/i.test(t) ? m(/^\s*(\d\s*&\s*\d)\s*$/m) : ''));
+  add('PED Category', m(/PED\s*Category[ \t]*[:\-]?[ \t]*([IV]{1,3})\b/i) ||
+                      (/PED\s*Category/i.test(t) ? m(/^\s*(I{1,3}|IV)\s*$/m) : ''));
+  add('Application', m(/\b(LBP|MBP|HBP|L\/MBP|M\/HBP)\b/));
+  add('IP', m(/\b(IP\s?\d{2})\b/));
+  add('LRA', m(/LRA[ \t]*[:\-]?[ \t]*(\d+(?:[.,]\d+)?\s*A)\b/i));
+  add('MCC', m(/MCC[ \t]*[:\-]?[ \t]*(\d+(?:[.,]\d+)?\s*A)\b/i));
+  add('RLA', m(/RLA[ \t]*[:\-]?[ \t]*(\d+(?:[.,]\d+)?\s*A)\b/i));
+  const pressoes = todos(/-?\d+(?:[.,]\d+)?(?:\s*\/\s*-?\d+(?:[.,]\d+)?)?\s*bar\b/gi);
+  if (pressoes.length) add('Pressões (PS HP / PS LP / TS / HP Setting)', pressoes.join(' · '));
+  add('PT (temperatura)', m(/(-?\d+\s*\/\s*-?\d+\s*°\s*C)/));
+  add('Year of Mfg.', dados.ano);
+  add('PRV Setting', m(/PRV\s*Setting[ \t]*[:\-]?[ \t]*(\d+(?:[.,]\d+)?)/i));
+  add('HP Setting', m(/HP\s*Setting[ \t]*[:\-]?[ \t]*(\d+(?:[.,]\d+)?)/i));
+  add('Group 1', m(/Group\s*1[ \t]*[:\-]?[ \t]*(R\d{3,4}[A-Za-z]{0,2}(?:\/R\d{3,4}[A-Za-z]{0,2})?)/i));
+  add('Group 2', m(/Group\s*2[ \t]*[:\-]?[ \t]*(R\d{3,4}[A-Za-z]{0,2}(?:\/R\d{3,4}[A-Za-z]{0,2})?)/i));
+  add('Refrigerante', dados.refrigerante);
+  add('Classe refrigerante', m(/\b(A[123]L?)\s*Refrigerant/i) || m(/\b(A2L|A3|A1)\b/));
+  add('Fabricante', /danfoss/i.test(t) ? 'Danfoss' : m(/\b(Bitzer|Copeland|Embraco|Tecumseh|Secop|Emerson|Frascold|Dorin)\b/i));
+  add('Origem', m(/MADE\s*IN\s*([A-Z][A-Za-z]+)/i));
+  add('Marcações', todos(/\b(CE|UKCA|UK\s?CA|EAC|UL|CSA|RoHS)\b/g).join(' · '));
+  // Linhas "Nome: valor" que não foram apanhadas acima
+  t.split(/\n/).forEach(l => {
+    const r = l.match(/^\s*([A-Za-zÀ-ú][A-Za-zÀ-ú .\/()#-]{1,30}?)\s*[:=]\s*(\S.{0,60})$/);
+    if (r && !c.some(x => x[0].toLowerCase().indexOf(r[1].trim().toLowerCase()) === 0)) add(r[1].trim(), r[2]);
+  });
+  return c;
 }
 
 /* ===================== EMAIL ===================== */
@@ -516,10 +652,10 @@ function doGet(e) {
   }
   const d = info.dados || {};
 
-  const linhas = [
+  const linhas = ((info.campos && info.campos.length) ? info.campos : [
     ['Modelo', d.modelo], ['Código', d.codigo], ['Serial etiqueta', d.serial],
     ['EAN', d.ean], ['Voltagem', d.voltagem], ['Ano fabrico', d.ano], ['Refrigerante', d.refrigerante],
-  ].filter(l => l[1])
+  ]).filter(l => l[1])
    .map(l => `<tr><th>${esc_(l[0])}</th><td>${esc_(l[1])}</td></tr>`).join('');
 
   // Fotos: lidas pelo script (corre como o dono), por isso a pasta não precisa de ser pública
@@ -678,17 +814,20 @@ function formFinalizar(pin, pastaId) {
   const pasta = DriveApp.getFolderById(pastaId);
   if (!pastaPertenceAoRelatorio_(pasta)) throw new Error('Pasta inválida.');
   const partes = pasta.getName().split(/\s*[-–_]\s*/);
-  const item = { pasta, serial: partes.shift(), grupo: partes.join(' '), dados: {} };
+  const item = { pasta, serial: partes.shift(), grupo: partes.join(' '), dados: {}, campos: [] };
 
   const fotos = [];
   const files = pasta.getFiles();
   while (files.hasNext()) { const f = files.next(); if (f.getMimeType().indexOf('image/') === 0) fotos.push(f); }
   if (CONFIG.USAR_OCR && CONFIG.OCR_AO_REGISTAR) {
-    try { item.dados = lerEtiquetaOCR_(fotos); } catch (e) {}
+    try {
+      const r = analisarEtiquetas_(fotos);
+      Object.assign(item, { dados: r.dados, campos: r.campos, textoOCR: r.texto, fonte: r.fonte, fotos });
+    } catch (e) { Logger.log('Leitura falhou: ' + e.message); }
   }
   guardarDadosNaPasta_(item);
   const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
-  return { link: webApp + '?id=' + pastaId, serial: item.serial, grupo: item.grupo, dados: item.dados, fotos: fotos.length };
+  return { link: webApp + '?id=' + pastaId, serial: item.serial, grupo: item.grupo, dados: item.dados, campos: item.campos, fotos: fotos.length };
 }
 
 /** Botão "Enviar relatório agora" do formulário. */
