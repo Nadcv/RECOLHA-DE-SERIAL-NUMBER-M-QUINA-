@@ -76,7 +76,8 @@ const CONFIG = {
   // Molduras da folha (pontos; A4 útil ≈ 515 x 770)
   FOLHA_DADOS: true,
   GEMINI_API_KEY: '',                       // chave grátis em aistudio.google.com: lê TUDO das etiquetas com IA
-  GEMINI_MODELO: '',                        // vazio = escolhe automaticamente o modelo "flash" mais recente                        // 2.ª folha com os dados lidos nas fotos
+  GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash e, se esgotar, flash-lite)
+  GEMINI_MAX_DIA: 200,                      // máximo de leituras por IA por dia (o resto usa OCR)                        // 2.ª folha com os dados lidos nas fotos
   MOLDURA1: { largura: 400, altura: 265 },  // Foto 1 – etiqueta grande (placa de características)
   MOLDURA2: { largura: 515, altura: 185 },  // Foto 2 – etiqueta pequena (código de barras)
 };
@@ -113,7 +114,9 @@ function enviarRelatorio__() {
       // reaproveita a leitura feita no registo (evita ler duas vezes)
       let info = {};
       try { info = JSON.parse(item.pasta.getDescription() || '{}'); } catch (e) {}
-      const r = (info.campos && info.campos.length && info.nFotos === item.fotos.length)
+      // se no registo só deu OCR (ex.: limite da IA esgotado), tenta de novo com IA
+      const r = (info.campos && info.campos.length && info.nFotos === item.fotos.length &&
+                 (info.fonte === 'IA' || !geminiDisponivel_()))
         ? { dados: info.dados || {}, campos: info.campos, texto: info.texto || '', fonte: info.fonte }
         : analisarEtiquetas_(item.fotos);
       Object.assign(item, { dados: r.dados, campos: r.campos, textoOCR: r.texto, fonte: r.fonte });
@@ -430,8 +433,8 @@ function blobImagem_(file) {
 function analisarEtiquetas_(fotos) {
   fotos = escolherFotos_(fotos).filter(Boolean);
   if (!fotos.length) return { dados: {}, campos: [], texto: '', fonte: '' };
-  if (CONFIG.GEMINI_API_KEY) {
-    try { return lerComGemini_(fotos); } catch (e) { Logger.log('Gemini falhou: ' + e.message); }
+  if (geminiDisponivel_()) {
+    try { return lerComGemini_(fotos); } catch (e) { Logger.log('Gemini falhou, uso OCR: ' + e.message); }
   }
   const texto = lerTextoOCR_(fotos);
   const dados = extrairDados_(texto);
@@ -444,23 +447,43 @@ function lerEtiquetaOCR_(fotos) {
 
 /* ---------- IA (Gemini) ---------- */
 
-function modeloGemini_() {
-  if (CONFIG.GEMINI_MODELO) return CONFIG.GEMINI_MODELO;
+/* Limites da versão gratuita: no máximo GEMINI_MAX_DIA leituras por dia; quando o Google
+   responde 429 (limite atingido) esse modelo fica em pausa 1 hora e passa-se ao seguinte.
+   Se nenhum estiver disponível, usa-se o OCR (grátis e sem limites). */
+function hojeChave_() {
+  return 'gemini_' + Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyyMMdd');
+}
+function geminiDisponivel_() {
+  if (!CONFIG.GEMINI_API_KEY) return false;
+  const usadas = Number(PropertiesService.getScriptProperties().getProperty(hojeChave_()) || 0);
+  return usadas < CONFIG.GEMINI_MAX_DIA;
+}
+function contarLeituraGemini_() {
+  const props = PropertiesService.getScriptProperties();
+  const k = hojeChave_();
+  props.setProperty(k, String(Number(props.getProperty(k) || 0) + 1));
+  Object.keys(props.getProperties()).forEach(x => { if (/^gemini_\d{8}$/.test(x) && x !== k) props.deleteProperty(x); });
+}
+
+/** Modelos a tentar, por ordem: o "flash" mais recente e depois o "flash-lite" (limites gratuitos maiores). */
+function modelosGemini_() {
+  if (CONFIG.GEMINI_MODELO) return [CONFIG.GEMINI_MODELO];
   const cache = CacheService.getScriptCache();
-  const guardado = cache.get('gemini_modelo');
-  if (guardado) return guardado;
+  const guardado = cache.get('gemini_modelos');
+  if (guardado) return JSON.parse(guardado);
   const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=' +
                                 encodeURIComponent(CONFIG.GEMINI_API_KEY), { muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) throw new Error('Chave Gemini inválida (' + res.getResponseCode() + ')');
   const nomes = (JSON.parse(res.getContentText()).models || [])
     .filter(m => (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0)
     .map(m => m.name.replace('models/', ''))
-    .filter(n => /flash/.test(n) && !/lite|image|tts|audio|live|thinking|exp|preview/.test(n));
+    .filter(n => /^gemini-.*flash/.test(n) && !/image|tts|audio|live|thinking|exp|preview/.test(n));
   const versao = n => { const v = n.match(/(\d+(?:\.\d+)?)/); return v ? parseFloat(v[1]) : 0; };
-  nomes.sort((a, b) => versao(b) - versao(a) || a.length - b.length);
-  const escolhido = nomes[0] || 'gemini-2.5-flash';
-  cache.put('gemini_modelo', escolhido, 21600);
-  return escolhido;
+  const melhor = lista => lista.sort((a, b) => versao(b) - versao(a) || a.length - b.length)[0];
+  const lista = [melhor(nomes.filter(n => !/lite/.test(n))) || 'gemini-2.5-flash',
+                 melhor(nomes.filter(n => /lite/.test(n))) || 'gemini-2.5-flash-lite'];
+  cache.put('gemini_modelos', JSON.stringify(lista), 21600);
+  return lista;
 }
 
 function lerComGemini_(fotos) {
@@ -477,19 +500,31 @@ Responde só com JSON neste formato:
     const b = blobImagem_(f);
     partes.push({ inline_data: { mime_type: b.getContentType() || 'image/jpeg', data: Utilities.base64Encode(b.getBytes()) } });
   });
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modeloGemini_() +
-              ':generateContent?key=' + encodeURIComponent(CONFIG.GEMINI_API_KEY);
-  const res = UrlFetchApp.fetch(url, {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({
-      contents: [{ role: 'user', parts: partes }],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
-    }),
+  const payload = JSON.stringify({
+    contents: [{ role: 'user', parts: partes }],
+    generationConfig: { temperature: 0, responseMimeType: 'application/json' },
   });
-  if (res.getResponseCode() !== 200) {
-    CacheService.getScriptCache().remove('gemini_modelo');
-    throw new Error('HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300));
+  const cache = CacheService.getScriptCache();
+  let res = null, erro = 'sem modelo disponível';
+  for (const modelo of modelosGemini_()) {
+    if (cache.get('gemini_pausa_' + modelo)) continue;
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelo +
+                              ':generateContent?key=' + encodeURIComponent(CONFIG.GEMINI_API_KEY),
+                              { method: 'post', contentType: 'application/json', muteHttpExceptions: true, payload });
+      const code = res.getResponseCode();
+      if (code === 200) break;
+      erro = modelo + ' HTTP ' + code + ': ' + res.getContentText().slice(0, 200);
+      if (code === 503 || code === 500) { Utilities.sleep(3000); continue; }   // sobrecarga: tenta outra vez
+      if (code === 429) cache.put('gemini_pausa_' + modelo, '1', 3600);       // limite: pausa 1 hora
+      if (code === 404) cache.remove('gemini_modelos');                       // modelo deixou de existir
+      break;
+    }
+    if (res && res.getResponseCode() === 200) break;
+    res = null;
   }
+  if (!res) throw new Error(erro);
+  contarLeituraGemini_();
   const cand = (JSON.parse(res.getContentText()).candidates || [])[0];
   const txt = cand && cand.content && cand.content.parts ? cand.content.parts.map(p => p.text || '').join('') : '';
   const j = JSON.parse(txt.replace(/^```(?:json)?|```$/g, '').trim());
