@@ -57,6 +57,8 @@
  *     "Adicionar ao ecrã principal" para ficar como uma app.
  */
 
+// Publicado automaticamente pelo GitHub Actions: os valores privados (pasta, email, PIN)
+// vêm dos Secrets do GitHub e são aplicados pelo ficheiro Segredos.gs (gerado na publicação).
 const CONFIG = {
   PASTA_ID: 'COLE_AQUI_O_ID_DA_PASTA',     // parte final do URL da pasta no Drive
   EMAIL_DESTINO: 'destino@exemplo.com',     // vários: 'a@x.com,b@y.com'
@@ -408,6 +410,19 @@ function obterOuCriarPasta_(pai, nome) {
 }
 
 /** Corre o envio todos os dias às 18h. */
+/**
+ * EXECUTAR UMA VEZ no editor do Apps Script depois da 1.ª publicação:
+ * autoriza o acesso ao Drive, Docs, Gmail e Internet, e cria o envio diário às 18h.
+ */
+function autorizar() {
+  DriveApp.getFolderById(CONFIG.PASTA_ID).getName();
+  MailApp.getRemainingDailyQuota();
+  UrlFetchApp.fetch('https://api.qrserver.com/v1/create-qr-code/?size=50x50&data=teste');
+  criarAgendamentoDiario();
+  Logger.log('✅ Autorizado. Pasta: ' + DriveApp.getFolderById(CONFIG.PASTA_ID).getName() +
+             ' | Email: ' + CONFIG.EMAIL_DESTINO + ' | URL: ' + ScriptApp.getService().getUrl());
+}
+
 function criarAgendamentoDiario() {
   ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === 'enviarRelatorio')

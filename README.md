@@ -20,20 +20,42 @@ com **QR code**, e envia-o por **email**.
 | Ficheiro | O que é |
 |---|---|
 | `index.html`, `sw.js`, `manifest.webmanifest`, `icons/` | A aplicação (publicada no GitHub Pages) |
-| `apps-script/Codigo.gs` | Servidor no Google Apps Script |
+| `apps-script/Codigo.gs`, `appsscript.json` | Servidor no Google Apps Script |
+| `.github/workflows/servidor.yml` | Publica o servidor automaticamente |
 | `apps-script/index.html` | Formulário alternativo dentro do Apps Script (ficheiro HTML `index`) |
 
 ## Instalação
 
-### 1. Servidor (Google Apps Script)
-1. [script.google.com](https://script.google.com) → **Novo projeto** → colar `apps-script/Codigo.gs`.
-   Ficheiros (+) → HTML → nome `index` → colar `apps-script/index.html`.
-2. No `CONFIG`: `PASTA_ID` (pasta do Drive), `EMAIL_DESTINO`, `CODIGO_ACESSO` (PIN).
-   > ⚠️ Este repositório é público: **não faças commit** do teu PIN nem do ID da pasta.
-3. Serviços (+) → **Drive API** (para a leitura automática das etiquetas).
-4. Implementar → Nova implementação → **Aplicação Web** → Executar como **Eu** → Acesso **Qualquer pessoa**.
-5. Copiar o URL `/exec` para `WEB_APP_URL` → Gerir implementações → **Nova versão**.
-6. (Opcional) Executar `criarAgendamentoDiario` para enviar o relatório todos os dias às 18h.
+### 1. Servidor – publicado automaticamente pelo GitHub
+O código está em `apps-script/`. Sempre que muda, o GitHub Actions publica-o no Google Apps Script
+(workflow **Publicar servidor**). Os dados privados ficam nos **Secrets** do GitHub, nunca no código.
+
+**Configuração (uma vez):**
+1. Ativar a **Google Apps Script API**: https://script.google.com/home/usersettings → *Ativado*.
+2. Obter o login do `clasp` (ficheiro `.clasprc.json`) — num computador com Node.js:
+   ```
+   npx @google/clasp@2.4.2 login
+   ```
+   Autorizar no browser e abrir o ficheiro `~/.clasprc.json` (Windows: `C:\Users\<nome>\.clasprc.json`).
+3. No GitHub: **Settings → Secrets and variables → Actions → New repository secret**:
+   | Nome | Valor |
+   |---|---|
+   | `CLASPRC_JSON` | conteúdo completo do `.clasprc.json` |
+   | `PASTA_ID` | ID da pasta do Drive (fim do URL da pasta) |
+   | `EMAIL_DESTINO` | email(s) que recebem o relatório (`a@x.com,b@y.com`) |
+   | `CODIGO_ACESSO` | PIN da aplicação |
+4. **Actions → Publicar servidor → Run workflow.** No fim, o resumo mostra o `SCRIPT_ID`, o
+   `DEPLOYMENT_ID` e o **URL do servidor**. Guardar `SCRIPT_ID` e `DEPLOYMENT_ID` também como Secrets
+   (assim as próximas publicações atualizam o mesmo projeto e o URL não muda).
+5. Abrir https://script.google.com → projeto **Recolha de Serial Number** → executar a função
+   **`autorizar`** uma vez (autoriza Drive/Docs/Gmail e cria o envio diário às 18h).
+
+<details><summary>Alternativa manual (sem GitHub Actions)</summary>
+
+script.google.com → Novo projeto → colar `apps-script/Codigo.gs`, ficheiro HTML `index` e preencher o
+`CONFIG`; Serviços (+) → Drive API; Implementar → Aplicação Web → Executar como **Eu** → Acesso
+**Qualquer pessoa**.
+</details>
 
 ### 2. Aplicação (GitHub Pages)
 Settings → Pages → *Deploy from a branch* → escolher o ramo deste código e a pasta `/ (root)` → Save.
