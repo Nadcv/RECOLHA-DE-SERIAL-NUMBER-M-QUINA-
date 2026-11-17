@@ -358,7 +358,7 @@ function apiEtiquetasQR_(ids) {
     if (CONFIG.LOGOTIPOS) {
       try {
         const lg = p.appendInlineImage(logoBlob_('cablotec'));
-        lg.setHeight(18).setWidth(Math.round(18 * lg.getWidth() / lg.getHeight()));
+        lg.setWidth(Math.round(18 * lg.getWidth() / lg.getHeight())).setHeight(18);
         p.appendText('\n');
       } catch (e) {}
     }

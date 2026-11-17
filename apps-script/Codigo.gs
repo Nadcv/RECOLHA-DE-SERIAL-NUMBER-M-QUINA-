@@ -337,11 +337,11 @@ function cabecalhoLogos_(body) {
     const c = tabelaInvisivel_(body, [300, 215]);
     const pe = c[0].getChild(0).asParagraph();
     const le = pe.appendInlineImage(logoBlob_('cablotec'));
-    le.setHeight(30).setWidth(Math.round(30 * le.getWidth() / le.getHeight()));
+    le.setWidth(Math.round(30 * le.getWidth() / le.getHeight())).setHeight(30);
     const pd = c[1].getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
     pd.appendText('Cliente  ').setFontSize(7).setForegroundColor('#888888').setBold(false);
     const ld = pd.appendInlineImage(logoBlob_('aralab'));
-    ld.setHeight(24).setWidth(Math.round(24 * ld.getWidth() / ld.getHeight()));
+    ld.setWidth(Math.round(24 * ld.getWidth() / ld.getHeight())).setHeight(24);
     const linha = body.appendParagraph('').setSpacingBefore(2).setSpacingAfter(6);
     linha.appendHorizontalRule();
     linha.editAsText().setFontSize(2);
