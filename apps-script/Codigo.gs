@@ -80,8 +80,8 @@ const CONFIG = {
   GEMINI_API_KEY: '',                       // chave grátis em aistudio.google.com: lê TUDO das etiquetas com IA
   GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash-lite e, se falhar, flash)
   GEMINI_MAX_DIA: 200,                      // máximo de leituras por IA por dia (o resto usa OCR)                        // 2.ª folha com os dados lidos nas fotos
-  MOLDURA1: { largura: 400, altura: 240 },  // Foto 1 – etiqueta grande (placa de características)
-  MOLDURA2: { largura: 515, altura: 165 },  // Foto 2 – etiqueta pequena (código de barras)
+  MOLDURA1: { largura: 400, altura: 228 },  // Foto 1 – etiqueta grande (placa de características)
+  MOLDURA2: { largura: 515, altura: 155 },  // Foto 2 – etiqueta pequena (código de barras)
 };
 
 /* ===================== FUNÇÃO PRINCIPAL ===================== */
@@ -337,12 +337,12 @@ function cabecalhoLogos_(body) {
     const c = tabelaInvisivel_(body, [300, 215]);
     const pe = c[0].getChild(0).asParagraph();
     const le = pe.appendInlineImage(logoBlob_('cablotec'));
-    le.setWidth(Math.round(30 * le.getWidth() / le.getHeight())).setHeight(30);
+    le.setWidth(Math.round(24 * le.getWidth() / le.getHeight())).setHeight(24);
     const pd = c[1].getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
     pd.appendText('Cliente  ').setFontSize(7).setForegroundColor('#888888').setBold(false);
     const ld = pd.appendInlineImage(logoBlob_('aralab'));
-    ld.setWidth(Math.round(24 * ld.getWidth() / ld.getHeight())).setHeight(24);
-    const linha = body.appendParagraph('').setSpacingBefore(2).setSpacingAfter(6);
+    ld.setWidth(Math.round(20 * ld.getWidth() / ld.getHeight())).setHeight(20);
+    const linha = body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(2);
     linha.appendHorizontalRule();
     linha.editAsText().setFontSize(2);
   } catch (e) { Logger.log('Logótipos: ' + e.message); }
