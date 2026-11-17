@@ -62,7 +62,7 @@
 const CONFIG = {
   PASTA_ID: 'COLE_AQUI_O_ID_DA_PASTA',     // parte final do URL da pasta no Drive
   EMAIL_DESTINO: 'destino@exemplo.com',     // vários: 'a@x.com,b@y.com'
-  ASSUNTO: 'Relatório de Seriais',
+  ASSUNTO: 'Relatório de Registo de Equipamentos',
   USAR_OCR: true,                           // precisa do serviço "Drive API"
   MOVER_PARA_ENVIADOS: true,
   GERAR_QR: true,                           // QR code em cada página
@@ -145,10 +145,14 @@ function enviarRelatorio__(ids, emails) {
   const pdf = docFile.getAs(MimeType.PDF).setName(nome + '.pdf');
 
   // 3) Enviar email
+  const quandoTxt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy 'às' HH:mm");
   MailApp.sendEmail({
     to: para,
-    subject: `${CONFIG.ASSUNTO} – ${itens.length} serial(is) – ${data}`,
-    htmlBody: corpoEmail_(itens),
+    subject: `Relatório de Registo de Equipamentos – ${itens.length} equipamento${itens.length === 1 ? '' : 's'} – ` +
+             Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+    name: 'Cablotec – Geração de Etiquetas',
+    htmlBody: corpoEmail_(itens, quandoTxt),
+    body: textoEmail_(itens, quandoTxt),
     attachments: [pdf],
   });
 
@@ -665,24 +669,117 @@ function camposDoOCR_(t, dados) {
 
 /* ===================== EMAIL ===================== */
 
-function corpoEmail_(itens) {
-  const linhas = itens.map(it => {
-    const d = it.dados || {}, x = it.extras || {};
-    const serial = it.link ? `<a href="${it.link}">${esc_(it.serial)}</a>` : esc_(it.serial);
-    let cod = '';
-    try { cod = '<br><small style="color:#555;font-family:monospace">' + codigoRastreio_(it.pasta, it.registadoEm) + '</small>'; } catch (e) {}
-    return `<tr><td>${serial}${cod}</td><td>${esc_(it.grupo || '')}</td><td>${esc_(x.cliente || '')}</td>` +
-           `<td>${esc_(d.modelo || '')}</td><td>${esc_(d.serial || '')}</td><td>${esc_(x.tecnico || '')}</td>` +
-           `<td>${it.fotos.length}</td></tr>`;
-  }).join('');
+/** Email formal (HTML com estilos em linha, compatível com Outlook e Gmail). */
+function corpoEmail_(itens, quando) {
+  const n = itens.length;
+  const azul = '#1a3d8f';
+  const unicos = (f) => itens.map(f).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+  const clientes = unicos(it => (it.extras || {}).cliente);
+  const tecnicos = unicos(it => (it.extras || {}).tecnico);
   let folha = '';
   try { folha = folhaUrl_(); } catch (e) {}
-  return `<p>Olá,</p><p>Segue em anexo o relatório em PDF com ${itens.length} serial(is).</p>
-    <table border="1" cellpadding="6" style="border-collapse:collapse;font-family:Arial;font-size:13px">
-      <tr style="background:#eee"><th>Serial</th><th>Grupo</th><th>Cliente / Obra</th><th>Modelo</th>
-      <th>Serial etiqueta</th><th>Técnico</th><th>Fotos</th></tr>${linhas}</table>
-    ${folha ? `<p><a href="${folha}">📊 Ver o histórico completo na folha de cálculo</a></p>` : ''}
-    <p style="color:#888;font-size:12px">Cada serial tem um link para a ficha (fotos e dados).</p>`;
+
+  const linhas = itens.map((it, i) => {
+    const d = it.dados || {}, x = it.extras || {};
+    let cod = '';
+    try { cod = codigoRastreio_(it.pasta, it.registadoEm); } catch (e) {}
+    const fundo = i % 2 ? '#f7f8fb' : '#ffffff';
+    const td = 'padding:9px 10px;border-bottom:1px solid #e3e6ee;font-size:13px;color:#222;vertical-align:top;';
+    return `<tr style="background:${fundo}">
+      <td style="${td}font-family:Consolas,monospace;color:${azul};font-weight:bold;white-space:nowrap">${esc_(cod)}</td>
+      <td style="${td}font-weight:bold">${esc_(it.serial)}</td>
+      <td style="${td}white-space:nowrap">${esc_(it.grupo || '—')}</td>
+      <td style="${td}">${esc_(x.cliente || '—')}</td>
+      <td style="${td}">${esc_(d.modelo || '—')}<br><span style="color:#777;font-size:12px">${esc_(d.serial ? 'S/N ' + d.serial : '')}</span></td>
+      <td style="${td}white-space:nowrap">${it.link ? `<a href="${it.link}" style="color:${azul};font-weight:bold;text-decoration:none">Ver ficha&nbsp;›</a>` : ''}</td>
+    </tr>`;
+  }).join('');
+  const th = `padding:9px 10px;font-size:12px;color:#ffffff;text-align:left;font-weight:bold;letter-spacing:.3px;background:${azul};`;
+
+  const resumo = [
+    ['Equipamentos registados', String(n)],
+    ['Data de emissão', quando],
+    clientes.length ? ['Cliente / Obra', clientes.join(', ')] : null,
+    tecnicos.length ? ['Técnico responsável', tecnicos.join(', ')] : null,
+  ].filter(Boolean).map(([k, v]) => `<tr>
+      <td style="padding:4px 14px 4px 0;font-size:13px;color:#666;white-space:nowrap">${esc_(k)}</td>
+      <td style="padding:4px 0;font-size:13px;color:#222;font-weight:bold">${esc_(v)}</td></tr>`).join('');
+
+  return `<!DOCTYPE html><html lang="pt"><body style="margin:0;padding:0;background:#eef1f6">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:24px 0">
+<tr><td align="center">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;font-family:Arial,Helvetica,sans-serif">
+  <tr><td style="background:${azul};padding:22px 28px">
+    <div style="font-size:20px;font-weight:bold;color:#ffffff">Relatório de Registo de Equipamentos</div>
+    <div style="font-size:13px;color:#c9d4ee;margin-top:4px">Placas de características e números de série</div>
+  </td></tr>
+  <tr><td style="padding:26px 28px 6px">
+    <p style="margin:0 0 14px;font-size:14px;color:#222">Exmos. Senhores,</p>
+    <p style="margin:0 0 14px;font-size:14px;color:#222;line-height:1.55">
+      Vimos por este meio remeter o relatório de registo de ${n === 1 ? 'um equipamento' : n + ' equipamentos'},
+      com a identificação do número de série, a informação do grupo e os dados constantes das respetivas placas de características.</p>
+    <p style="margin:0 0 18px;font-size:14px;color:#222;line-height:1.55">
+      Segue em anexo o documento em formato PDF, que inclui, para cada equipamento, as fotografias das etiquetas,
+      a transcrição dos dados técnicos e um código de rastreio único para consulta e arquivo.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px;border-left:3px solid ${azul};padding-left:12px">${resumo}</table>
+  </td></tr>
+  <tr><td style="padding:0 28px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e3e6ee">
+      <tr><th style="${th}">Código de rastreio</th><th style="${th}">Serial</th><th style="${th}">Grupo</th>
+          <th style="${th}">Cliente / Obra</th><th style="${th}">Modelo</th><th style="${th}"></th></tr>
+      ${linhas}
+    </table>
+  </td></tr>
+  <tr><td style="padding:20px 28px 4px">
+    <p style="margin:0 0 12px;font-size:13px;color:#444;line-height:1.55">
+      A ficha de cada equipamento pode ser consultada através da ligação “Ver ficha” ou lendo o código QR impresso no relatório.
+      ${folha ? `O histórico completo de registos está disponível na <a href="${folha}" style="color:${azul}">folha de registo</a>.` : ''}</p>
+    <p style="margin:0 0 22px;font-size:14px;color:#222;line-height:1.55">
+      Ficamos ao dispor para qualquer esclarecimento adicional.</p>
+    <p style="margin:0 0 4px;font-size:14px;color:#222">Com os melhores cumprimentos,</p>
+  </td></tr>
+  <tr><td style="padding:10px 28px 26px">
+    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+      <td style="border-left:4px solid ${azul};padding:4px 0 4px 12px">
+        <div style="font-size:15px;font-weight:bold;color:${azul}">Aplicação Cablotec</div>
+        <div style="font-size:13px;color:#555">Geração de Etiquetas e Registo de Equipamentos</div>
+      </td></tr></table>
+  </td></tr>
+  <tr><td style="background:#f4f6fa;padding:14px 28px;border-top:1px solid #e3e6ee">
+    <p style="margin:0;font-size:11px;color:#888;line-height:1.5">
+      Esta mensagem foi gerada automaticamente pela Aplicação Cablotec – Geração de Etiquetas.
+      O documento anexo contém informação técnica destinada exclusivamente aos destinatários indicados.</p>
+  </td></tr>
+</table>
+</td></tr></table></body></html>`;
+}
+
+/** Versão em texto simples do mesmo email (para programas de email sem HTML). */
+function textoEmail_(itens, quando) {
+  const linhas = itens.map(it => {
+    const d = it.dados || {}, x = it.extras || {};
+    let cod = '';
+    try { cod = codigoRastreio_(it.pasta, it.registadoEm); } catch (e) {}
+    return `• ${cod} | Serial ${it.serial} | Grupo ${it.grupo || '—'}` + (x.cliente ? ` | ${x.cliente}` : '') +
+           (d.modelo ? ` | ${d.modelo}` : '') + (it.link ? `\n  Ficha: ${it.link}` : '');
+  }).join('\n');
+  return `Exmos. Senhores,
+
+Vimos por este meio remeter o relatório de registo de ${itens.length} equipamento(s), emitido em ${quando}, com a identificação do número de série, a informação do grupo e os dados constantes das respetivas placas de características.
+
+Segue em anexo o documento em formato PDF, que inclui as fotografias das etiquetas, a transcrição dos dados técnicos e um código de rastreio único para cada equipamento.
+
+${linhas}
+
+Ficamos ao dispor para qualquer esclarecimento adicional.
+
+Com os melhores cumprimentos,
+
+Aplicação Cablotec
+Geração de Etiquetas e Registo de Equipamentos
+
+—
+Mensagem gerada automaticamente pela Aplicação Cablotec – Geração de Etiquetas.`;
 }
 
 /* ===================== UTILITÁRIOS ===================== */
