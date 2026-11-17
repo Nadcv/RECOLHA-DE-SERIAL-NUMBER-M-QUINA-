@@ -1121,6 +1121,7 @@ function doPost(e) {
       case 'obter':           verificarPin_(pin); data = apiObter_(req.pastaId); break;
       case 'corrigir':        verificarPin_(pin); data = apiCorrigir_(req.pastaId, req.campos, req.extras); break;
       case 'etiquetasQR':     verificarPin_(pin); data = apiEtiquetasQR_(req.ids); break;
+      case 'remover':         verificarPin_(pin); data = apiRemover_(req.pastaId); break;
       default: throw new Error('Ação desconhecida.');
     }
     resposta = { ok: true, data };

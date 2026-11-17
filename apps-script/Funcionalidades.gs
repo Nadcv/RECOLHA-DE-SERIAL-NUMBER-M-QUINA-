@@ -329,6 +329,19 @@ function apiCorrigir_(pastaId, campos, extras) {
   return apiObter_(pastaId);
 }
 
+/** Remove um registo: a pasta (fotos, ficha) vai para o lixo do Drive e sai da folha de cálculo. */
+function apiRemover_(pastaId) {
+  const pasta = pastaValida_(pastaId);
+  const nome = pasta.getName();
+  pasta.setTrashed(true);
+  try {
+    const reg = lerRegisto_();
+    if (reg[pastaId]) { delete reg[pastaId]; gravarRegisto_(reg); }
+  } catch (e) { Logger.log('Folha: ' + e.message); }
+  Logger.log('Removido: ' + nome);
+  return { removido: nome };
+}
+
 /* ===================== ETIQUETAS QR PARA IMPRIMIR ===================== */
 
 /** Cria um PDF A4 com etiquetas (QR + serial + grupo) para colar nos equipamentos. */
