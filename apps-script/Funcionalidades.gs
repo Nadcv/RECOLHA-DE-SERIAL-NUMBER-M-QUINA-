@@ -151,9 +151,15 @@ function gravarRegisto_(reg) {
 /** Cria a folha (com os registos que já existem), se ainda não existir. Devolve o URL. */
 function folha_() {
   const props = PropertiesService.getScriptProperties();
+  const cache = CacheService.getScriptCache();
   if (!props.getProperty('FOLHA_ID') || !props.getProperty('REGISTO_JSON_ID')) {
     props.deleteProperty('REGISTO_JSON_ID');
     gravarRegisto_(lerRegisto_());
+    cache.put('registo_sync', '1', 21600);
+  } else if (!cache.get('registo_sync')) {
+    // de 6 em 6 horas volta a ler todas as pastas (apanha pastas apagadas ou mudadas à mão)
+    cache.put('registo_sync', '1', 21600);
+    gravarRegisto_(construirRegisto_());
   }
   return folhaUrl_();
 }
