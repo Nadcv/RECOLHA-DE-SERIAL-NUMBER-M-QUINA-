@@ -74,8 +74,9 @@ const CONFIG = {
   QR_LINK_PUBLICO: false,                   // só para QR_DESTINO 'pasta': true = qualquer pessoa vê a pasta
   GUARDAR_FICHA_NA_PASTA: true,             // guarda "Ficha_<serial>.pdf" dentro da pasta do serial
   // Molduras da folha (pontos; A4 útil ≈ 515 x 770)
-  MOLDURA1: { largura: 400, altura: 280 },  // Foto 1 – etiqueta grande (placa de características)
-  MOLDURA2: { largura: 515, altura: 200 },  // Foto 2 – etiqueta pequena (código de barras)
+  FOLHA_DADOS: true,                        // 2.ª folha com os dados lidos nas fotos
+  MOLDURA1: { largura: 400, altura: 265 },  // Foto 1 – etiqueta grande (placa de características)
+  MOLDURA2: { largura: 515, altura: 185 },  // Foto 2 – etiqueta pequena (código de barras)
 };
 
 /* ===================== FUNÇÃO PRINCIPAL ===================== */
@@ -106,7 +107,10 @@ function enviarRelatorio__() {
   body.clear();
 
   itens.forEach((item, i) => {
-    if (CONFIG.USAR_OCR) item.dados = lerEtiquetaOCR_(item.fotos);
+    if (CONFIG.USAR_OCR) {
+      item.textoOCR = lerTextoOCR_(item.fotos);
+      item.dados = extrairDados_(item.textoOCR);
+    }
     if (CONFIG.GERAR_QR) prepararQR_(item);
     montarPagina_(body, item);
     if (i < itens.length - 1) body.appendPageBreak();
@@ -219,6 +223,60 @@ function montarPagina_(body, item) {
 
   // 5) Moldura 2 – etiqueta pequena (largura toda)
   moldura_(body, item.foto2, CONFIG.MOLDURA2, 'Foto 2 – etiqueta pequena');
+
+  // 6) Segunda folha: dados lidos das etiquetas
+  if (CONFIG.FOLHA_DADOS) {
+    const quebra = body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
+    quebra.appendPageBreak();
+    quebra.editAsText().setFontSize(1);
+    montarFolhaDados_(body, item);
+  }
+}
+
+const CAMPOS_ETIQUETA_ = [
+  ['modelo', 'Modelo'], ['codigo', 'Código'], ['serial', 'Serial (etiqueta)'], ['ean', 'Código de barras (EAN)'],
+  ['voltagem', 'Tensão'], ['refrigerante', 'Refrigerante'], ['ano', 'Ano de fabrico'],
+];
+
+/** Folha 2: tabela com o que foi lido nas fotos (OCR) + o texto completo. */
+function montarFolhaDados_(body, item) {
+  const d = item.dados || {};
+  const titulo = body.appendParagraph('DADOS LIDOS DAS ETIQUETAS');
+  titulo.editAsText().setBold(true).setFontSize(15).setForegroundColor('#000000');
+  titulo.setSpacingBefore(0).setSpacingAfter(4);
+  const sub = body.appendParagraph(`Serial ${item.serial}  ·  Grupo ${item.grupo || '—'}` +
+                                   (item.enviadoEm ? `  ·  ${item.enviadoEm}` : ''));
+  sub.editAsText().setBold(false).setFontSize(10).setForegroundColor('#555555');
+  sub.setSpacingAfter(10);
+
+  const linhas = [['SERIAL NO', item.serial || '—'], ['INFORMAÇÃO DO GRUPO', item.grupo || '—']]
+    .concat(CAMPOS_ETIQUETA_.map(([k, nome]) => [nome, d[k] || '—']));
+  const t = body.appendTable(linhas);
+  t.setBorderWidth(1).setBorderColor('#999999');
+  for (let r = 0; r < t.getNumRows(); r++) {
+    const c0 = t.getCell(r, 0).setWidth(190).setBackgroundColor('#f0f2f6');
+    const c1 = t.getCell(r, 1);
+    [c0, c1].forEach(c => c.setPaddingTop(5).setPaddingBottom(5).setPaddingLeft(8));
+    c0.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
+    const vazio = linhas[r][1] === '—';
+    c1.editAsText().setBold(!vazio).setFontSize(11).setForegroundColor(vazio ? '#aaaaaa' : '#1a3d8f');
+  }
+
+  const nLidos = CAMPOS_ETIQUETA_.filter(([k]) => d[k]).length;
+  const nota = body.appendParagraph(nLidos
+    ? `Lidos automaticamente ${nLidos} de ${CAMPOS_ETIQUETA_.length} campos. Confirme com as fotos da folha anterior.`
+    : 'Não foi possível ler dados nas fotos. Tire as fotos de perto, direitas e com boa luz.');
+  nota.editAsText().setBold(false).setFontSize(9).setForegroundColor('#777777');
+  nota.setSpacingBefore(8);
+
+  if (item.textoOCR && item.textoOCR.trim()) {
+    const h = body.appendParagraph('Texto completo lido nas fotos');
+    h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
+    h.setSpacingBefore(16).setSpacingAfter(4);
+    const txt = item.textoOCR.replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
+    const p = body.appendParagraph(txt);
+    p.editAsText().setBold(false).setFontSize(8).setForegroundColor('#555555').setFontFamily('Courier New');
+  }
 }
 
 /** Tabela sem bordas, só para posicionar as caixas. Devolve as células. */
@@ -354,6 +412,10 @@ function blobImagem_(file) {
 /* ===================== OCR DA ETIQUETA ===================== */
 
 function lerEtiquetaOCR_(fotos) {
+  return extrairDados_(lerTextoOCR_(fotos));
+}
+
+function lerTextoOCR_(fotos) {
   let texto = '';
   fotos.forEach(f => {
     try {
@@ -368,7 +430,7 @@ function lerEtiquetaOCR_(fotos) {
       Logger.log('OCR falhou em ' + f.getName() + ': ' + e.message);
     }
   });
-  return extrairDados_(texto);
+  return texto;
 }
 
 function extrairDados_(t) {
