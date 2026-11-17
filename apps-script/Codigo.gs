@@ -164,9 +164,9 @@ function enviarRelatorio__(ids, emails) {
   }
   const quando = agora_();
   itens.forEach(it => {
-    try { it.enviadoEm = quando; guardarDadosNaPasta_(it); registarNaFolha_(it.pasta, 'Enviado'); }
-    catch (e) { Logger.log('Folha: ' + e.message); }
+    try { it.enviadoEm = quando; guardarDadosNaPasta_(it); } catch (e) { Logger.log('Dados: ' + e.message); }
   });
+  try { registarVarios_(itens.map(it => [it.pasta, 'Enviado'])); } catch (e) { Logger.log('Folha: ' + e.message); }
 
   Logger.log(`Enviado: ${itens.length} serial(is) para ${para}`);
   return itens.length;
@@ -699,8 +699,7 @@ function autorizar() {
   MailApp.getRemainingDailyQuota();
   UrlFetchApp.fetch('https://api.qrserver.com/v1/create-qr-code/?size=50x50&data=teste');
   criarAgendamentoDiario();
-  const folha = folha_();   // cria a folha de cálculo (e preenche com os registos que já existem)
-  Logger.log('📊 Folha de cálculo: ' + folha.getUrl());
+  Logger.log('📊 Folha de cálculo: ' + folha_());   // cria a folha (com os registos que já existem)
   Logger.log('✅ Autorizado. Pasta: ' + DriveApp.getFolderById(CONFIG.PASTA_ID).getName() +
              ' | Email: ' + CONFIG.EMAIL_DESTINO + ' | URL: ' + ScriptApp.getService().getUrl());
 }
@@ -1011,6 +1010,6 @@ function apiListar_(pin) {
   }
   porEnviar.sort((a, b) => b._t - a._t);
   let folha = '';
-  try { folha = folhaUrl_(); } catch (e) {}
+  try { folha = folha_(); } catch (e) { Logger.log('Folha: ' + e.message); }
   return { porEnviar, enviados, folha, emailPadrao: CONFIG.EMAIL_DESTINO };
 }

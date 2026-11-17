@@ -82,26 +82,80 @@ const COLUNAS_FOLHA_ = ['Serial', 'Grupo', 'Cliente / Obra', 'Local', 'Técnico'
   'Enviado em', 'Leitura', 'Modelo', 'Código', 'Serial etiqueta', 'EAN', 'Tensão', 'Refrigerante', 'Ano',
   'Todos os campos', 'Observações', 'Ficha', 'Pasta', 'ID'];
 
-/** Abre (ou cria, na pasta principal) a folha "Registo de Seriais". */
+/*
+ * A folha "Registo de Seriais" é uma Google Sheet gerada a partir de um ficheiro de dados
+ * (registo-seriais.json) na pasta principal. Usa só o acesso ao Drive que já está autorizado,
+ * por isso não é preciso dar permissões novas.
+ */
+
+function registoFicheiro_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('REGISTO_JSON_ID');
+  if (id) {
+    try { const f = DriveApp.getFileById(id); if (!f.isTrashed()) return f; } catch (e) {}
+  }
+  const raiz = DriveApp.getFolderById(CONFIG.PASTA_ID);
+  const f = raiz.createFile('registo-seriais.json', JSON.stringify(construirRegisto_()), 'application/json');
+  f.setDescription('Dados da folha "Registo de Seriais" (gerido pela aplicação). Não apagar.');
+  props.setProperty('REGISTO_JSON_ID', f.getId());
+  return f;
+}
+
+function lerRegisto_() {
+  try { return JSON.parse(registoFicheiro_().getBlob().getDataAsString('UTF-8') || '{}'); } catch (e) { return {}; }
+}
+
+/** Constrói o registo a partir de todas as pastas (por enviar e enviadas). */
+function construirRegisto_() {
+  const raiz = DriveApp.getFolderById(CONFIG.PASTA_ID);
+  const reg = {};
+  const subs = raiz.getFolders();
+  while (subs.hasNext()) {
+    const f = subs.next();
+    if (f.getName() === 'Enviados') {
+      const env = f.getFolders();
+      while (env.hasNext()) { const e = env.next(); reg[e.getId()] = linhaFolha_(e, 'Enviado'); }
+    } else if (!pastaDeSistema_(f.getName())) {
+      reg[f.getId()] = linhaFolha_(f, 'Por enviar');
+    }
+  }
+  return reg;
+}
+
+/** Escreve o registo e atualiza a Google Sheet (cria-a se não existir). */
+function gravarRegisto_(reg) {
+  registoFicheiro_().setContent(JSON.stringify(reg));
+  const linhas = Object.keys(reg).map(k => reg[k]);
+  const ordem = v => { const m = String(v || '').match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})/); return m ? m[3] + m[2] + m[1] + m[4] + m[5] : ''; };
+  linhas.sort((a, b) => ordem(b[5]).localeCompare(ordem(a[5])));   // mais recentes primeiro
+  const csvCel = v => {
+    v = String(v == null ? '' : v);
+    if (/^[=+@]/.test(v)) v = ' ' + v;   // evita fórmulas
+    return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  };
+  const csv = [COLUNAS_FOLHA_].concat(linhas).map(l => l.map(csvCel).join(',')).join('\r\n');
+  const blob = Utilities.newBlob(csv, 'text/csv', 'Registo de Seriais.csv');
+  const props = PropertiesService.getScriptProperties();
+  let id = props.getProperty('FOLHA_ID');
+  if (id) {
+    try { if (DriveApp.getFileById(id).isTrashed()) id = null; } catch (e) { id = null; }
+  }
+  if (id) {
+    Drive.Files.update({}, id, blob);
+  } else {
+    const f = Drive.Files.create({ name: 'Registo de Seriais', mimeType: MimeType.GOOGLE_SHEETS, parents: [CONFIG.PASTA_ID] }, blob);
+    props.setProperty('FOLHA_ID', f.id);
+  }
+}
+
+/** Cria a folha (com os registos que já existem), se ainda não existir. Devolve o URL. */
 function folha_() {
   const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('FOLHA_ID');
-  if (id) {
-    try {
-      if (!DriveApp.getFileById(id).isTrashed()) return SpreadsheetApp.openById(id);
-    } catch (e) { /* foi apagada: cria outra */ }
+  if (!props.getProperty('FOLHA_ID') || !props.getProperty('REGISTO_JSON_ID')) {
+    props.deleteProperty('REGISTO_JSON_ID');
+    gravarRegisto_(lerRegisto_());
   }
-  const ss = SpreadsheetApp.create('Registo de Seriais');
-  DriveApp.getFileById(ss.getId()).moveTo(DriveApp.getFolderById(CONFIG.PASTA_ID));
-  const sh = ss.getSheets()[0].setName('Registos');
-  sh.getRange(1, 1, 1, COLUNAS_FOLHA_.length).setValues([COLUNAS_FOLHA_])
-    .setFontWeight('bold').setBackground('#1a3d8f').setFontColor('#ffffff');
-  sh.setFrozenRows(1);
-  sh.setColumnWidth(COLUNAS_FOLHA_.indexOf('Todos os campos') + 1, 420);
-  sh.hideColumns(COLUNAS_FOLHA_.length);
-  props.setProperty('FOLHA_ID', ss.getId());
-  preencherFolhaComExistentes_(sh);
-  return ss;
+  return folhaUrl_();
 }
 
 function folhaUrl_() {
@@ -121,36 +175,17 @@ function linhaFolha_(pasta, estado) {
     d.modelo || '', d.codigo || '', d.serial || '', d.ean || '', d.voltagem || '', d.refrigerante || '', d.ano || '',
     (info.campos || []).map(c => c[0] + ': ' + c[1]).join('\n'), x.obs || '',
     webApp + '?id=' + pasta.getId(), pasta.getUrl(), pasta.getId(),
-  ].map(v => (typeof v === 'string' && /^[=+\-@]/.test(v)) ? "'" + v : v);   // evita fórmulas
+  ];
 }
 
 /** Acrescenta ou atualiza a linha desta pasta. */
 function registarNaFolha_(pasta, estado) {
-  const sh = folha_().getSheets()[0];
-  const linha = linhaFolha_(pasta, estado);
-  const colId = COLUNAS_FOLHA_.length;
-  const n = sh.getLastRow();
-  if (n > 1) {
-    const achado = sh.getRange(2, colId, n - 1, 1).createTextFinder(pasta.getId()).matchEntireCell(true).findNext();
-    if (achado) { sh.getRange(achado.getRow(), 1, 1, linha.length).setValues([linha]); return; }
-  }
-  sh.appendRow(linha);
+  registarVarios_([[pasta, estado]]);
 }
-
-function preencherFolhaComExistentes_(sh) {
-  const raiz = DriveApp.getFolderById(CONFIG.PASTA_ID);
-  const linhas = [];
-  const subs = raiz.getFolders();
-  while (subs.hasNext()) {
-    const f = subs.next();
-    if (f.getName() === 'Enviados') {
-      const env = f.getFolders();
-      while (env.hasNext()) linhas.push(linhaFolha_(env.next(), 'Enviado'));
-    } else if (!pastaDeSistema_(f.getName())) {
-      linhas.push(linhaFolha_(f, 'Por enviar'));
-    }
-  }
-  if (linhas.length) sh.getRange(2, 1, linhas.length, COLUNAS_FOLHA_.length).setValues(linhas);
+function registarVarios_(lista) {
+  const reg = lerRegisto_();
+  lista.forEach(([pasta, estado]) => { reg[pasta.getId()] = linhaFolha_(pasta, estado); });
+  gravarRegisto_(reg);
 }
 
 /* ===================== PESQUISA E DUPLICADOS ===================== */
@@ -186,21 +221,24 @@ function apiPesquisar_(q) {
   q = String(q || '').trim().toLowerCase();
   if (q.length < 2) throw new Error('Escreva pelo menos 2 letras ou números.');
   const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
-  // 1) Pela folha de cálculo (rápido)
+  // 1) Pelo registo da folha de cálculo (rápido)
   try {
-    const sh = folha_().getSheets()[0];
-    const n = sh.getLastRow();
-    if (n > 1) {
-      const v = sh.getRange(2, 1, n - 1, COLUNAS_FOLHA_.length).getDisplayValues();
+    folha_();
+    const reg = lerRegisto_();
+    const ids = Object.keys(reg);
+    if (ids.length) {
       const col = nome => COLUNAS_FOLHA_.indexOf(nome);
-      const res = v.filter(r => r.join(' ').toLowerCase().indexOf(q) >= 0).slice(0, 50).map(r => ({
-        serial: r[col('Serial')], grupo: r[col('Grupo')], cliente: r[col('Cliente / Obra')],
-        modelo: r[col('Modelo')], estado: r[col('Estado')], data: r[col('Enviado em')] || r[col('Registado em')],
-        link: r[col('Ficha')], id: r[col('ID')],
-      }));
-      return { resultados: res.reverse() };
+      const ordem = v => { const m = String(v || '').match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})/); return m ? m[3] + m[2] + m[1] + m[4] + m[5] : ''; };
+      const res = ids.map(k => reg[k]).filter(r => r.join(' ').toLowerCase().indexOf(q) >= 0)
+        .sort((a, b) => ordem(b[col('Registado em')]).localeCompare(ordem(a[col('Registado em')])))
+        .slice(0, 50).map(r => ({
+          serial: r[col('Serial')], grupo: r[col('Grupo')], cliente: r[col('Cliente / Obra')],
+          modelo: r[col('Modelo')], estado: r[col('Estado')], data: r[col('Enviado em')] || r[col('Registado em')],
+          link: r[col('Ficha')], id: r[col('ID')],
+        }));
+      return { resultados: res };
     }
-  } catch (e) { Logger.log('Pesquisa pela folha falhou: ' + e.message); }
+  } catch (e) { Logger.log('Pesquisa pelo registo falhou: ' + e.message); }
   // 2) Sem folha: procura no nome das pastas
   const raiz = DriveApp.getFolderById(CONFIG.PASTA_ID);
   const qq = q.replace(/['\\]/g, '');
