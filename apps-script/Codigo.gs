@@ -303,6 +303,15 @@ function montarFolhaDados_(body, item) {
     const p = body.appendParagraph(txt);
     p.editAsText().setBold(false).setFontSize(8).setForegroundColor('#555555').setFontFamily('Courier New');
   }
+
+  // Código de rastreio único deste registo
+  if (item.pasta) {
+    const cod = codigoRastreio_(item.pasta, item.registadoEm);
+    const r = body.appendParagraph('Código de rastreio: ');
+    r.setSpacingBefore(18);
+    r.editAsText().setBold(false).setFontSize(9).setForegroundColor('#555555').setFontFamily('Arial');
+    r.appendText(cod).setBold(true).setFontSize(11).setForegroundColor('#1a3d8f').setFontFamily('Courier New');
+  }
 }
 
 /** Tabela sem bordas, só para posicionar as caixas. Devolve as células. */
@@ -660,7 +669,9 @@ function corpoEmail_(itens) {
   const linhas = itens.map(it => {
     const d = it.dados || {}, x = it.extras || {};
     const serial = it.link ? `<a href="${it.link}">${esc_(it.serial)}</a>` : esc_(it.serial);
-    return `<tr><td>${serial}</td><td>${esc_(it.grupo || '')}</td><td>${esc_(x.cliente || '')}</td>` +
+    let cod = '';
+    try { cod = '<br><small style="color:#555;font-family:monospace">' + codigoRastreio_(it.pasta, it.registadoEm) + '</small>'; } catch (e) {}
+    return `<tr><td>${serial}${cod}</td><td>${esc_(it.grupo || '')}</td><td>${esc_(x.cliente || '')}</td>` +
            `<td>${esc_(d.modelo || '')}</td><td>${esc_(d.serial || '')}</td><td>${esc_(x.tecnico || '')}</td>` +
            `<td>${it.fotos.length}</td></tr>`;
   }).join('');
@@ -767,6 +778,8 @@ function doGet(e) {
     </div>
     ${fichaUrl ? `<a class="botao" href="${fichaUrl}" target="_blank">📄 Ficha em PDF</a>` : ''}
     <a class="botao sec" href="${pasta.getUrl()}" target="_blank">📁 Abrir pasta no Drive</a>
+    <div class="card"><div class="rotulo">CÓDIGO DE RASTREIO</div>
+      <div style="font-family:monospace;font-size:20px;font-weight:700;color:#1a3d8f">${esc_(codigoRastreio_(pasta, info.registadoEm))}</div></div>
     <footer>${info.registadoEm || info.enviadoEm ? 'Registado em ' + esc_(info.registadoEm || info.enviadoEm) : ''}
             ${info.enviadoEm && info.registadoEm ? ' · Enviado em ' + esc_(info.enviadoEm) : ''}</footer>`;
   return paginaHtml_(html, 'Serial ' + info.serial);
@@ -910,7 +923,7 @@ function formFinalizar(pin, pastaId, extras, codigos) {
   try { registarNaFolha_(pasta, 'Por enviar'); } catch (e) { Logger.log('Folha: ' + e.message); }
   const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
   return { link: webApp + '?id=' + pastaId, serial: item.serial, grupo: item.grupo, dados: item.dados, campos: item.campos, fotos: fotos.length,
-           pastaId, extras: item.extras, fonte: item.fonte || '' };
+           pastaId, extras: item.extras, fonte: item.fonte || '', rastreio: codigoRastreio_(pasta, item.registadoEm) };
 }
 
 /** Botão "Enviar relatório agora" do formulário. */

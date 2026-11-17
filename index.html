@@ -174,7 +174,7 @@
 <!-- ============ LISTA ============ -->
 <section id="e-lista" class="ecra">
   <form class="pesquisa" onsubmit="pesquisar();return false">
-    <input id="q" type="search" placeholder="Pesquisar serial, modelo, cliente…" autocomplete="off">
+    <input id="q" type="search" placeholder="Pesquisar serial, código RS-…, cliente…" autocomplete="off">
     <button type="submit">🔍</button>
   </form>
   <div class="abas">
@@ -270,7 +270,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.2.0';
+var VERSAO = '1.2.1';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '' };
 var fotos = { 1: null, 2: null };
 var abaAtual = 'pendentes', cacheLista = null, aEnviarFila = false;
@@ -480,6 +480,7 @@ function mostrarResultado(r, enviado) {
   });
   el('resultado').innerHTML =
     '<div class="serial">' + esc(r.serial) + '</div><div class="grupo">' + esc(r.grupo || '') + '</div>' +
+    (r.rastreio ? '<p class="dica" style="font-size:14px">Código de rastreio: <b style="font-family:monospace;color:#1a3d8f">' + esc(r.rastreio) + '</b></p>' : '') +
     (enviado ? '<p>✅ Enviado para o Google Drive (' + r.fotos + ' foto(s)).</p>'
              : '<p><span class="tag">Sem rede</span> Guardado no telemóvel. É enviado automaticamente quando houver ligação.</p>') +
     (linhas ? (enviado && r.fonte ? '<p class="dica">Lidos por ' + esc(r.fonte) + '. Toque em “Rever” para confirmar ou corrigir.</p>' : '') +
@@ -672,6 +673,7 @@ function desenharEditar(r) {
   edAtual = r;
   var x = r.extras || {};
   el('edCab').innerHTML = '<div class="serial">' + esc(r.serial) + '</div><div class="grupo">' + esc(r.grupo || '') + '</div>' +
+    (r.rastreio ? '<p class="dica" style="font-size:14px">Código de rastreio: <b style="font-family:monospace;color:#1a3d8f">' + esc(r.rastreio) + '</b></p>' : '') +
     (r.enviado ? '<p class="dica">Já enviado: a correção fica na ficha e na folha de cálculo.</p>' : '');
   el('edCliente').value = x.cliente || ''; el('edLocal').value = x.local || '';
   el('edTecnico').value = x.tecnico || ''; el('edObs').value = x.obs || '';

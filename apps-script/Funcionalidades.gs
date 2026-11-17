@@ -13,6 +13,25 @@ function pastaDeSistema_(nome) {
   return nome === 'Enviados' || nome === 'Etiquetas QR';
 }
 
+/* ===================== CÓDIGO DE RASTREIO ===================== */
+
+/**
+ * Código único e fixo de cada registo, ex.: RS-261117-K7Q4XZ
+ * (data do registo + 6 caracteres tirados do ID da pasta no Drive).
+ * É sempre o mesmo no PDF, na ficha do QR e na folha de cálculo, e pode ser pesquisado.
+ */
+function codigoRastreio_(pasta, registadoEm) {
+  const id = typeof pasta === 'string' ? pasta : pasta.getId();
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, id);
+  const ALF = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // sem 0/O e 1/I para não confundir
+  let sufixo = '';
+  for (let i = 0; i < 6; i++) sufixo += ALF[(bytes[i] + 256) % 32];
+  const m = String(registadoEm || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  const data = m ? m[3].slice(2) + m[2] + m[1]
+    : Utilities.formatDate(typeof pasta === 'string' ? new Date() : pasta.getDateCreated(), Session.getScriptTimeZone(), 'yyMMdd');
+  return 'RS-' + data + '-' + sufixo;
+}
+
 /* ===================== CAMPOS EXTRA ===================== */
 
 function limparExtras_(x) {
@@ -78,7 +97,7 @@ function aplicarCodigos_(r, codigos) {
 
 /* ===================== FOLHA DE CÁLCULO ===================== */
 
-const COLUNAS_FOLHA_ = ['Serial', 'Grupo', 'Cliente / Obra', 'Local', 'Técnico', 'Registado em', 'Estado',
+const COLUNAS_FOLHA_ = ['Código de rastreio', 'Serial', 'Grupo', 'Cliente / Obra', 'Local', 'Técnico', 'Registado em', 'Estado',
   'Enviado em', 'Leitura', 'Modelo', 'Código', 'Serial etiqueta', 'EAN', 'Tensão', 'Refrigerante', 'Ano',
   'Todos os campos', 'Observações', 'Ficha', 'Pasta', 'ID'];
 
@@ -127,7 +146,8 @@ function gravarRegisto_(reg) {
   registoFicheiro_().setContent(JSON.stringify(reg));
   const linhas = Object.keys(reg).map(k => reg[k]);
   const ordem = v => { const m = String(v || '').match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})/); return m ? m[3] + m[2] + m[1] + m[4] + m[5] : ''; };
-  linhas.sort((a, b) => ordem(b[5]).localeCompare(ordem(a[5])));   // mais recentes primeiro
+  const iData = COLUNAS_FOLHA_.indexOf('Registado em');
+  linhas.sort((a, b) => ordem(b[iData]).localeCompare(ordem(a[iData])));   // mais recentes primeiro
   const csvCel = v => {
     v = String(v == null ? '' : v);
     if (/^[=+@]/.test(v)) v = ' ' + v;   // evita fórmulas
@@ -156,7 +176,8 @@ function folha_() {
     props.deleteProperty('REGISTO_JSON_ID');
     gravarRegisto_(lerRegisto_());
     cache.put('registo_sync', '1', 21600);
-  } else if (!cache.get('registo_sync')) {
+  } else if (!cache.get('registo_sync') || !cache.get('registo_cols_' + COLUNAS_FOLHA_.length)) {
+    cache.put('registo_cols_' + COLUNAS_FOLHA_.length, '1', 21600);
     // de 6 em 6 horas volta a ler todas as pastas (apanha pastas apagadas ou mudadas à mão)
     cache.put('registo_sync', '1', 21600);
     gravarRegisto_(construirRegisto_());
@@ -175,7 +196,7 @@ function linhaFolha_(pasta, estado) {
   const d = info.dados || {}, x = info.extras || {};
   const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
   return [
-    info.serial || partes[0], info.grupo || partes.slice(1).join(' '), x.cliente || '', x.local || '', x.tecnico || '',
+    codigoRastreio_(pasta, info.registadoEm), info.serial || partes[0], info.grupo || partes.slice(1).join(' '), x.cliente || '', x.local || '', x.tecnico || '',
     info.registadoEm || '', estado, info.enviadoEm && estado === 'Enviado' ? info.enviadoEm : '',
     (info.fonte || '') + (info.corrigido ? ' (revisto)' : ''),
     d.modelo || '', d.codigo || '', d.serial || '', d.ean || '', d.voltagem || '', d.refrigerante || '', d.ano || '',
@@ -189,7 +210,8 @@ function registarNaFolha_(pasta, estado) {
   registarVarios_([[pasta, estado]]);
 }
 function registarVarios_(lista) {
-  const reg = lerRegisto_();
+  let reg = lerRegisto_();
+  if (Object.keys(reg).some(k => reg[k].length !== COLUNAS_FOLHA_.length)) reg = construirRegisto_();   // colunas mudaram
   lista.forEach(([pasta, estado]) => { reg[pasta.getId()] = linhaFolha_(pasta, estado); });
   gravarRegisto_(reg);
 }
@@ -281,7 +303,7 @@ function apiObter_(pastaId) {
   return {
     pastaId, serial: info.serial || partes[0], grupo: info.grupo || partes.slice(1).join(' '),
     campos: info.campos || [], dados: info.dados || {}, extras: info.extras || {}, fonte: info.fonte || '',
-    corrigido: !!info.corrigido, link: webApp + '?id=' + pastaId,
+    corrigido: !!info.corrigido, link: webApp + '?id=' + pastaId, rastreio: codigoRastreio_(pasta, info.registadoEm),
     enviado: pasta.getParents().hasNext() && pasta.getParents().next().getName() === 'Enviados',
   };
 }
