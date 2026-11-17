@@ -76,7 +76,7 @@ const CONFIG = {
   // Molduras da folha (pontos; A4 útil ≈ 515 x 770)
   FOLHA_DADOS: true,
   GEMINI_API_KEY: '',                       // chave grátis em aistudio.google.com: lê TUDO das etiquetas com IA
-  GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash e, se esgotar, flash-lite)
+  GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash-lite e, se falhar, flash)
   GEMINI_MAX_DIA: 200,                      // máximo de leituras por IA por dia (o resto usa OCR)                        // 2.ª folha com os dados lidos nas fotos
   MOLDURA1: { largura: 400, altura: 265 },  // Foto 1 – etiqueta grande (placa de características)
   MOLDURA2: { largura: 515, altura: 185 },  // Foto 2 – etiqueta pequena (código de barras)
@@ -465,7 +465,7 @@ function contarLeituraGemini_() {
   Object.keys(props.getProperties()).forEach(x => { if (/^gemini_\d{8}$/.test(x) && x !== k) props.deleteProperty(x); });
 }
 
-/** Modelos a tentar, por ordem: o "flash" mais recente e depois o "flash-lite" (limites gratuitos maiores). */
+/** Modelos a tentar, por ordem: o "flash-lite" mais recente e depois o "flash". */
 function modelosGemini_() {
   if (CONFIG.GEMINI_MODELO) return [CONFIG.GEMINI_MODELO];
   const cache = CacheService.getScriptCache();
@@ -480,8 +480,9 @@ function modelosGemini_() {
     .filter(n => /^gemini-.*flash/.test(n) && !/image|tts|audio|live|thinking|exp|preview/.test(n));
   const versao = n => { const v = n.match(/(\d+(?:\.\d+)?)/); return v ? parseFloat(v[1]) : 0; };
   const melhor = lista => lista.sort((a, b) => versao(b) - versao(a) || a.length - b.length)[0];
-  const lista = [melhor(nomes.filter(n => !/lite/.test(n))) || 'gemini-2.5-flash',
-                 melhor(nomes.filter(n => /lite/.test(n))) || 'gemini-2.5-flash-lite'];
+  // o "lite" primeiro: responde em ~2 s, tem limites gratuitos maiores e lê bem as etiquetas
+  const lista = [melhor(nomes.filter(n => /lite/.test(n))) || 'gemini-2.5-flash-lite',
+                 melhor(nomes.filter(n => !/lite/.test(n))) || 'gemini-2.5-flash'];
   cache.put('gemini_modelos', JSON.stringify(lista), 21600);
   return lista;
 }
@@ -508,15 +509,15 @@ Responde só com JSON neste formato:
   let res = null, erro = 'sem modelo disponível';
   for (const modelo of modelosGemini_()) {
     if (cache.get('gemini_pausa_' + modelo)) continue;
-    for (let tentativa = 0; tentativa < 2; tentativa++) {
+    for (let tentativa = 0; tentativa < 1; tentativa++) {
       res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelo +
                               ':generateContent?key=' + encodeURIComponent(CONFIG.GEMINI_API_KEY),
                               { method: 'post', contentType: 'application/json', muteHttpExceptions: true, payload });
       const code = res.getResponseCode();
       if (code === 200) break;
       erro = modelo + ' HTTP ' + code + ': ' + res.getContentText().slice(0, 200);
-      if (code === 503 || code === 500) { Utilities.sleep(3000); continue; }   // sobrecarga: tenta outra vez
-      if (code === 429) cache.put('gemini_pausa_' + modelo, '1', 3600);       // limite: pausa 1 hora
+      if (code === 503 || code === 500) cache.put('gemini_pausa_' + modelo, '1', 600); // sobrecarregado: pausa 10 min
+      if (code === 429) cache.put('gemini_pausa_' + modelo, '1', 3600);              // limite: pausa 1 hora
       if (code === 404) cache.remove('gemini_modelos');                       // modelo deixou de existir
       break;
     }
