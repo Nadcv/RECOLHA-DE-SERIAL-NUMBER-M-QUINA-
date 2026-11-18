@@ -639,3 +639,36 @@ function relatorioMensal_(emails, mes) {
   });
   return { mes: nomeMes, equipamentos: doMes.length, excel: anexos.length > 0 };
 }
+
+
+/* ===================== LIGAÇÃO PARA OUTRAS APLICAÇÕES ===================== */
+
+/**
+ * Consulta por serial (exato, sem diferenciar maiúsculas) ou por código de rastreio (RS-...).
+ * Devolve todos os registos encontrados com os dados completos.
+ * Pode ser chamado por POST {acao:'consultar', pin, serial} ou por GET ?api=consultar&serial=...&pin=...
+ */
+function apiConsultar_(q) {
+  q = String(q || '').trim().toUpperCase();
+  if (q.length < 2) throw new Error('Indique o serial ou o código de rastreio.');
+  folha_();
+  const reg = lerRegisto_();
+  const col = n => COLUNAS_FOLHA_.indexOf(n);
+  const ids = Object.keys(reg).filter(id => {
+    const r = reg[id];
+    return String(r[col('Serial')]).toUpperCase() === q || String(r[col('Código de rastreio')]).toUpperCase() === q ||
+           String(r[col('Serial etiqueta')]).toUpperCase() === q;
+  });
+  const registos = ids.map(id => {
+    const r = reg[id], o = apiObter_(id);
+    return {
+      serial: o.serial, grupo: o.grupo, rastreio: o.rastreio, estado: r[col('Estado')],
+      registadoEm: r[col('Registado em')], enviadoEm: r[col('Enviado em')],
+      cliente: (o.extras || {}).cliente || '', local: (o.extras || {}).local || '', tecnico: (o.extras || {}).tecnico || '',
+      observacoes: (o.extras || {}).obs || '', gps: (o.extras || {}).gps || null,
+      garantiaAte: r[col('Garantia até')], dados: o.dados, campos: o.campos,
+      ficha: o.link, pasta: r[col('Pasta')],
+    };
+  });
+  return { encontrado: registos.length > 0, total: registos.length, registos };
+}

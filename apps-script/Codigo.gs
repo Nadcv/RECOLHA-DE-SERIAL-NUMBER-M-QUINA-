@@ -909,6 +909,13 @@ function criarAgendamentoDiario() {
 
 function doGet(e) {
   if (e && e.parameter && e.parameter.form !== undefined) return formularioHtml_();
+  // Ligação para outras aplicações: ?api=consultar&serial=...&pin=...
+  if (e && e.parameter && e.parameter.api === 'consultar') {
+    let r;
+    try { verificarPin_(e.parameter.pin); r = { ok: true, data: apiConsultar_(e.parameter.serial || e.parameter.codigo) }; }
+    catch (err) { r = { ok: false, erro: err.message }; }
+    return ContentService.createTextOutput(JSON.stringify(r)).setMimeType(ContentService.MimeType.JSON);
+  }
   const id = e && e.parameter && e.parameter.id;
   if (!id) return paginaHtml_('<div class="card"><h2>Ficha não encontrada</h2><p>Leia o QR code da etiqueta.</p></div>');
 
@@ -1182,6 +1189,7 @@ function doPost(e) {
       case 'corrigir':        verificarPin_(pin); data = apiCorrigir_(req.pastaId, req.campos, req.extras); break;
       case 'etiquetasQR':     verificarPin_(pin); data = apiEtiquetasQR_(req.ids); break;
       case 'remover':         verificarPin_(pin); data = apiRemover_(req.pastaId); break;
+      case 'consultar':       verificarPin_(pin); data = apiConsultar_(req.serial || req.codigo); break;
       default: throw new Error('Ação desconhecida.');
     }
     resposta = { ok: true, data };
