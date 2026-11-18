@@ -220,6 +220,13 @@ function registarNaFolha_(pasta, estado) {
   registarVarios_([[pasta, estado]]);
 }
 function registarVarios_(lista) {
+  // vários técnicos ao mesmo tempo: só um de cada vez escreve na folha (para não se perderem linhas)
+  const lock = LockService.getScriptLock();
+  const jaTinha = lock.hasLock();
+  if (!jaTinha && !lock.tryLock(20000)) { Logger.log('Folha ocupada: atualiza na próxima sincronização.'); return; }
+  try { registarVarios__(lista); } finally { if (!jaTinha) lock.releaseLock(); }
+}
+function registarVarios__(lista) {
   let reg = lerRegisto_();
   if (Object.keys(reg).some(k => reg[k].length !== COLUNAS_FOLHA_.length)) reg = construirRegisto_();   // colunas mudaram
   lista.forEach(([pasta, estado]) => { reg[pasta.getId()] = linhaFolha_(pasta, estado); });
