@@ -82,8 +82,8 @@ const CONFIG = {
   GEMINI_API_KEY: '',                       // chave grátis em aistudio.google.com: lê TUDO das etiquetas com IA
   GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash-lite e, se falhar, flash)
   GEMINI_MAX_DIA: 200,                      // máximo de leituras por IA por dia (o resto usa OCR)                        // 2.ª folha com os dados lidos nas fotos
-  MOLDURA1: { largura: 515, altura: 320 },  // Foto 1 – etiqueta grande (placa de características)
-  MOLDURA2: { largura: 515, altura: 175 },  // Foto 2 – etiqueta pequena (código de barras)
+  MOLDURA1: { largura: 515, altura: 270 },  // Foto 1 – etiqueta grande (placa de características)
+  MOLDURA2: { largura: 515, altura: 160 },  // Foto 2 – etiqueta pequena (código de barras)
 };
 
 /* ===================== FUNÇÃO PRINCIPAL ===================== */
@@ -341,9 +341,13 @@ function montarFolhaDados_(body, item) {
     const h = body.appendParagraph(T_('Texto completo lido nas fotos', 'Full text read from the photos'));
     h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
     h.setSpacingBefore(16).setSpacingAfter(4);
-    const txt = item.textoOCR.replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
+    // texto corrido (não uma linha por palavra) e limitado ao espaço que sobra, para a ficha ficar em 2 folhas
+    const limite = Math.max(300, 2000 - n * 45);
+    let txt = item.textoOCR.split(/\n+/).map(l => l.trim()).filter(Boolean).join(' · ');
+    if (txt.length > limite) txt = txt.slice(0, limite).replace(/\s+\S*$/, '') + ' …';
     const p = body.appendParagraph(txt);
-    p.editAsText().setBold(false).setFontSize(8).setForegroundColor('#555555').setFontFamily('Courier New');
+    p.editAsText().setBold(false).setFontSize(7).setForegroundColor('#666666').setFontFamily('Arial');
+    p.setLineSpacing(1).setSpacingAfter(0);
   }
 
   // Foto 3 (equipamento / local) e assinatura, lado a lado
