@@ -233,6 +233,7 @@
   <div id="selbar" class="selbar">
     <button class="botao" id="btSelEnviar" onclick="abrirEnvio(true)">✉️ Enviar</button>
     <button class="botao sec" id="btSelQR" onclick="etiquetasQR(this)">🏷 Etiquetas QR</button>
+    <button class="botao sec" id="btSelApagar" style="color:#c62828;border-color:#c62828" onclick="apagarSelecionados(this)">🗑️ Apagar</button>
   </div>
   <button id="btRelatorio" class="botao" onclick="abrirEnvio(false)">✉️ Enviar relatório…</button>
   <a id="btFolha" class="botao sec" target="_blank" rel="noopener" style="display:none">📊 Abrir folha de cálculo</a>
@@ -344,7 +345,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.4.2';
+var VERSAO = '1.4.3';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -726,6 +727,7 @@ function desenharSelecao() {
   el('btSelEnviar').style.display = porEnviar ? '' : 'none';
   el('btSelEnviar').textContent = '✉️ Enviar (' + porEnviar + ')';
   el('btSelQR').textContent = '🏷 Etiquetas QR (' + n + ')';
+  if (el('btSelApagar')) el('btSelApagar').textContent = '🗑️ Apagar (' + n + ')';
 }
 function repetir(id) {
   filaTodos().then(function (l) {
@@ -840,6 +842,21 @@ function edRemover(bt) {
     alert('✔ Registo removido.'); mostrar('lista'); carregarLista(true);
   }).catch(function (e) { el('edEstado').textContent = '❌ ' + e.message; })
     .then(function () { bt.disabled = false; });
+}
+
+/* Apagar os registos selecionados */
+function apagarSelecionados(bt) {
+  var ids = Object.keys(selecionados);
+  if (!ids.length) return;
+  if (!confirm('Apagar ' + ids.length + ' registo(s) selecionado(s)?\n\nAs fotos e as fichas vão para o lixo do Google Drive (podem ser recuperadas durante 30 dias) e os registos saem da lista e da folha de cálculo.')) return;
+  bt.disabled = true; var feitos = 0, erros = [];
+  ids.reduce(function (p, id) {
+    return p.then(function () { return api('remover', { pastaId: id }).then(function () { feitos++; delete selecionados[id]; }).catch(function (e) { erros.push(e.message); }); });
+  }, Promise.resolve()).then(function () {
+    bt.disabled = false; cacheLista = null; resultadosPesquisa = null; desenharSelecao();
+    alert('✔ ' + feitos + ' registo(s) apagado(s).' + (erros.length ? '\n❌ ' + erros.length + ' com erro: ' + erros[0] : ''));
+    carregarLista(true);
+  });
 }
 
 /* Apagar um serial já registado, diretamente na lista (ao lado de editar) */
