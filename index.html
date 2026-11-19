@@ -345,7 +345,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.4.5';
+var VERSAO = '1.4.6';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -774,7 +774,13 @@ function enviarRelatorio(bt) {
     emails.split(/[,;\s]+/).filter(Boolean).forEach(function (e) { lembrar('emails', e); }); desenharClientes();
     alert(r.enviados ? '✔ Relatório enviado com ' + r.enviados + ' registo(s).' : 'Nada para enviar.');
     selecionados = {}; cacheLista = null; mostrar('lista'); carregarLista(true);
-  }).catch(function (e) { alert('❌ ' + e.message); })
+  }).catch(function (e) {
+    // o iPhone desiste de esperar, mas o servidor continua a gerar e enviar o relatório
+    if (/load failed|failed to fetch|network|timed out|abort/i.test(e.message || '')) {
+      alert('⏳ O relatório está a demorar e o telemóvel deixou de esperar, mas o servidor continua a enviá-lo.\n\nVerifique o e-mail daqui a 1–2 minutos. Não é preciso enviar outra vez.');
+      selecionados = {}; cacheLista = null; mostrar('lista'); carregarLista(true);
+    } else alert('❌ ' + e.message);
+  })
     .then(function () { bt.disabled = false; bt.textContent = '✉️ Enviar relatório'; });
 }
 
