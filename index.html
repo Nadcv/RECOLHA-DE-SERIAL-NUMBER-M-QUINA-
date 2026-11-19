@@ -345,7 +345,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.4.3';
+var VERSAO = '1.4.4';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -1088,7 +1088,33 @@ window.addEventListener('online', atualizarRede);
 window.addEventListener('offline', atualizarRede);
 document.addEventListener('visibilitychange', function () { if (!document.hidden) processarFila(); });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(function (reg) { try { reg.update(); } catch (e) {} });
+
+/* Atualizações: o iPhone mantém a app "adormecida" e ao voltar não recarrega. Ao abrir/voltar, procura versão nova. */
+(function () {
+  var escondidaDesde = 0;
+  function procurarVersaoNova() {
+    if (!navigator.onLine) return;
+    fetch('index.html?v=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (t) {
+      var m = t.match(/var VERSAO = '([^']+)'/);
+      if (m && m[1] !== VERSAO && !document.getElementById('avisoVersao')) {
+        var b = document.createElement('div'); b.id = 'avisoVersao';
+        b.style.cssText = 'position:fixed;left:10px;right:10px;top:10px;z-index:9999;background:#3a393a;color:#fff;border-left:5px solid #c9272e;border-radius:10px;padding:12px 14px;font-size:15px;box-shadow:0 4px 14px rgba(0,0,0,.3)';
+        b.innerHTML = '🔄 <b>Há uma versão nova da app (' + m[1] + ').</b><br>Toque aqui para atualizar (guarde primeiro o que estiver a preencher).';
+        b.onclick = function () {
+          (navigator.serviceWorker && navigator.serviceWorker.getRegistration ? navigator.serviceWorker.getRegistration() : Promise.resolve(null))
+            .then(function (reg) { return reg ? reg.update() : null; }).catch(function () {}).then(function () { location.reload(); });
+        };
+        document.body.appendChild(b);
+      }
+    }).catch(function () {});
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { escondidaDesde = Date.now(); return; }
+    if (Date.now() - escondidaDesde > 60000) procurarVersaoNova();
+  });
+  setTimeout(procurarVersaoNova, 4000);
+})();
 
 /* ---------------- Arranque ---------------- */
 el('versao').textContent = VERSAO;
