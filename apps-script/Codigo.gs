@@ -106,7 +106,12 @@ function enviarRelatorioPara_(ids, emails, idioma) {
 function enviarRelatorio__(ids, emails) {
   const pasta = DriveApp.getFolderById(CONFIG.PASTA_ID);
   let itens = lerSubpastas_(pasta);
-  if (ids && ids.length) itens = itens.filter(it => ids.indexOf(it.pasta.getId()) >= 0);
+  if (ids && ids.length) {
+    // reenvio: os registos escolhidos podem já estar em "Enviados"
+    const env = pasta.getFoldersByName('Enviados');
+    if (env.hasNext()) itens = itens.concat(lerSubpastas_(env.next()));
+    itens = itens.filter(it => ids.indexOf(it.pasta.getId()) >= 0);
+  }
   const para = (emails && String(emails).trim()) ? String(emails).trim() : CONFIG.EMAIL_DESTINO;
 
   if (itens.length === 0) {
@@ -178,7 +183,7 @@ function enviarRelatorio__(ids, emails) {
   docFile.setTrashed(true);       // apaga o Google Doc temporário
   if (CONFIG.MOVER_PARA_ENVIADOS) {
     const enviados = obterOuCriarPasta_(pasta, 'Enviados');
-    itens.forEach(it => it.pasta.moveTo(enviados));
+    itens.forEach(it => { if (it.pasta.getParents().next().getId() !== enviados.getId()) it.pasta.moveTo(enviados); });
   }
   const quando = agora_();
   itens.forEach(it => {

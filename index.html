@@ -345,7 +345,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.4.4';
+var VERSAO = '1.4.5';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -724,8 +724,8 @@ function desenharSelecao() {
   var ids = Object.keys(selecionados), n = ids.length;
   el('selbar').style.display = n ? 'flex' : 'none';
   var porEnviar = ids.filter(function (i) { return selecionados[i] === 'Por enviar'; }).length;
-  el('btSelEnviar').style.display = porEnviar ? '' : 'none';
-  el('btSelEnviar').textContent = '✉️ Enviar (' + porEnviar + ')';
+  el('btSelEnviar').style.display = n ? '' : 'none';
+  el('btSelEnviar').textContent = porEnviar === n ? '✉️ Enviar (' + n + ')' : '✉️ Reenviar (' + n + ')';
   el('btSelQR').textContent = '🏷 Etiquetas QR (' + n + ')';
   if (el('btSelApagar')) el('btSelApagar').textContent = '🗑️ Apagar (' + n + ')';
 }
@@ -742,10 +742,18 @@ function apagar(id) {
 
 /* ---------------- Enviar relatório (escolher registos e emails) ---------------- */
 function abrirEnvio(soSelecionados) {
-  var l = (cacheLista && cacheLista.porEnviar) || [];
+  var l = ((cacheLista && cacheLista.porEnviar) || []).slice();
+  if (soSelecionados) {   // reenviar também registos já enviados que estejam marcados
+    var todos = [].concat((cacheLista && cacheLista.enviados) || [], resultadosPesquisa || []);
+    Object.keys(selecionados).forEach(function (id) {
+      if (l.some(function (x) { return x.id === id; })) return;
+      var it = todos.filter(function (x) { return x.id === id; })[0];
+      if (it) l.push(it);
+    });
+  }
   if (!l.length) { alert('Não há registos por enviar.'); return; }
   el('envLista').innerHTML = l.map(function (it) {
-    var on = !soSelecionados || selecionados[it.id] === 'Por enviar';
+    var on = !soSelecionados || !!selecionados[it.id];
     return '<label style="display:flex;gap:10px;align-items:center;font-size:15px;color:#222;letter-spacing:0;font-weight:600;margin:8px 0">' +
       '<input type="checkbox" class="envSel" value="' + esc(it.id) + '"' + (on ? ' checked' : '') + ' style="width:22px;height:22px;flex:none">' +
       esc(it.serial) + ' <span style="font-weight:400;color:#666">' + esc(it.grupo) + (it.cliente ? ' · ' + esc(it.cliente) : '') + '</span></label>';
