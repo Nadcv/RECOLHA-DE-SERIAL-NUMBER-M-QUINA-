@@ -83,7 +83,8 @@ const CONFIG = {
   GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash-lite e, se falhar, flash)
   GEMINI_MAX_DIA: 200,                      // máximo de leituras por IA por dia (o resto usa OCR)                        // 2.ª folha com os dados lidos nas fotos
   MOLDURA1: { largura: 515, altura: 270 },  // Foto 1 – etiqueta grande (placa de características)
-  MOLDURA2: { largura: 515, altura: 160 },  // Foto 2 – etiqueta pequena (código de barras)
+  MOLDURA2: { largura: 515, altura: 160 },
+  MOSTRAR_TEXTO_OCR: false,                 // texto em bruto lido nas fotos no PDF (desligado a pedido)  // Foto 2 – etiqueta pequena (código de barras)
 };
 
 /* ===================== FUNÇÃO PRINCIPAL ===================== */
@@ -342,7 +343,7 @@ function montarFolhaDados_(body, item) {
     body.appendParagraph(x.obs).editAsText().setBold(false).setFontSize(10).setForegroundColor('#222222');
   }
 
-  if (item.fonte !== 'IA' && !blocoExtra && item.textoOCR && item.textoOCR.trim()) {
+  if (CONFIG.MOSTRAR_TEXTO_OCR && item.fonte !== 'IA' && !blocoExtra && item.textoOCR && item.textoOCR.trim()) {   // desligado: só a tabela
     const h = body.appendParagraph(T_('Texto completo lido nas fotos', 'Full text read from the photos'));
     h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#333333');
     h.setSpacingBefore(16).setSpacingAfter(4);
