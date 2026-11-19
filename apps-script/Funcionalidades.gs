@@ -211,7 +211,7 @@ function linhaFolha_(pasta, estado) {
     (garantia_(d, info.campos) || {}).fim || '',
     x.gps ? 'https://www.google.com/maps?q=' + x.gps.lat + ',' + x.gps.lon : '', x.assinadoPor || '',
     (info.campos || []).map(c => c[0] + ': ' + c[1]).join('\n'), x.obs || '',
-    webApp + '?id=' + pasta.getId(), pasta.getUrl(), pasta.getId(),
+    linkFicha_(pasta.getId()), pasta.getUrl(), pasta.getId(),
   ];
 }
 
@@ -257,7 +257,7 @@ function apiVerificar_(serial) {
   const l = pastasComSerial_(serial).map(a => {
     const info = lerInfo_(a.pasta);
     return { estado: a.estado, grupo: info.grupo || '', data: info.enviadoEm || info.registadoEm || '',
-             link: webApp + '?id=' + a.pasta.getId() };
+             link: linkFicha_(a.pasta.getId()) };
   });
   return { existe: l.length > 0, registos: l };
 }
@@ -295,7 +295,7 @@ function apiPesquisar_(q) {
       if (pastaDeSistema_(f.getName())) continue;
       res.push({ serial: info.serial || f.getName(), grupo: info.grupo || '', cliente: (info.extras || {}).cliente || '',
                  modelo: (info.dados || {}).modelo || '', estado, data: info.enviadoEm || info.registadoEm || '',
-                 link: webApp + '?id=' + f.getId(), id: f.getId() });
+                 link: linkFicha_(f.getId()), id: f.getId() });
     }
   };
   procurar(raiz, 'Por enviar');
@@ -320,7 +320,7 @@ function apiObter_(pastaId) {
   return {
     pastaId, serial: info.serial || partes[0], grupo: info.grupo || partes.slice(1).join(' '),
     campos: info.campos || [], dados: info.dados || {}, extras: info.extras || {}, fonte: info.fonte || '',
-    corrigido: !!info.corrigido, link: webApp + '?id=' + pastaId, rastreio: codigoRastreio_(pasta, info.registadoEm),
+    corrigido: !!info.corrigido, link: linkFicha_(pastaId), rastreio: codigoRastreio_(pasta, info.registadoEm),
     enviado: pasta.getParents().hasNext() && pasta.getParents().next().getName() === 'Enviados',
   };
 }
@@ -370,7 +370,7 @@ function apiEtiquetasQR_(ids) {
     const pasta = pastaValida_(id), info = lerInfo_(pasta);
     const partes = pasta.getName().split(/\s*[-–_]\s*/);
     return { serial: info.serial || partes[0], grupo: info.grupo || partes.slice(1).join(' '),
-             modelo: (info.dados || {}).modelo || '', link: webApp + '?id=' + id };
+             modelo: (info.dados || {}).modelo || '', link: linkFicha_(id) };
   });
   const data = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
   const doc = DocumentApp.create('Etiquetas QR ' + data);

@@ -448,7 +448,7 @@ function prepararQR_(item) {
     guardarDadosNaPasta_(item);
     const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
     if (CONFIG.QR_DESTINO === 'pagina' && webApp) {
-      item.link = webApp + '?id=' + item.pasta.getId();
+      item.link = linkFicha_(item.pasta.getId());
     } else {
       if (CONFIG.QR_LINK_PUBLICO) {
         item.pasta.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
@@ -909,6 +909,13 @@ function criarAgendamentoDiario() {
 
 function doGet(e) {
   if (e && e.parameter && e.parameter.form !== undefined) return formularioHtml_();
+  // Ficha para a página pública (GitHub Pages): devolve o HTML em JSON, sem passar pela página do Google
+  // (evita "Neste momento, não é possível abrir o ficheiro" quando o telemóvel tem várias contas Google)
+  if (e && e.parameter && e.parameter.api === 'ficha') {
+    let html = '';
+    try { html = doGet({ parameter: { id: e.parameter.id } }).getContent(); } catch (err) { html = ''; }
+    return ContentService.createTextOutput(JSON.stringify({ ok: !!html, html: html })).setMimeType(ContentService.MimeType.JSON);
+  }
   // Ligação para outras aplicações: ?api=consultar&serial=...&pin=...
   if (e && e.parameter && e.parameter.api === 'consultar') {
     let r;
@@ -987,6 +994,13 @@ function doGet(e) {
     <footer>${info.registadoEm || info.enviadoEm ? 'Registado em ' + esc_(info.registadoEm || info.enviadoEm) : ''}
             ${info.enviadoEm && info.registadoEm ? ' · Enviado em ' + esc_(info.enviadoEm) : ''}</footer>`;
   return paginaHtml_(html, 'Serial ' + info.serial);
+}
+
+/** Link da ficha: abre pela página pública (sem a página do Google); o endereço do servidor vai no link. */
+function linkFicha_(pastaId) {
+  const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
+  const pagina = CONFIG.PAGINA_FICHA_URL || 'https://nadcv.github.io/Cablotec-public/ficha.html';
+  return pagina + '?id=' + encodeURIComponent(pastaId) + '&s=' + encodeURIComponent(webApp);
 }
 
 function paginaHtml_(conteudo, titulo) {
@@ -1136,7 +1150,7 @@ function formFinalizar(pin, pastaId, extras, codigos) {
   guardarDadosNaPasta_(item);
   try { registarNaFolha_(pasta, 'Por enviar'); } catch (e) { Logger.log('Folha: ' + e.message); }
   const webApp = CONFIG.WEB_APP_URL || ScriptApp.getService().getUrl();
-  return { link: webApp + '?id=' + pastaId, serial: item.serial, grupo: item.grupo, dados: item.dados, campos: item.campos, fotos: fotos.length,
+  return { link: linkFicha_(pastaId), serial: item.serial, grupo: item.grupo, dados: item.dados, campos: item.campos, fotos: fotos.length,
            pastaId, extras: item.extras, fonte: item.fonte || '', rastreio: codigoRastreio_(pasta, item.registadoEm) };
 }
 
@@ -1218,7 +1232,7 @@ function apiListar_(pin) {
       cliente: (info.extras || {}).cliente || '', tecnico: (info.extras || {}).tecnico || '',
       fonte: info.fonte || '', corrigido: !!info.corrigido,
       data: Utilities.formatDate(pasta.getLastUpdated(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm'),
-      link: webApp + '?id=' + pasta.getId(), _t: pasta.getLastUpdated().getTime(),
+      link: linkFicha_(pasta.getId()), _t: pasta.getLastUpdated().getTime(),
     };
   };
 
