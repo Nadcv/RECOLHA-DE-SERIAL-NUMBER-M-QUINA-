@@ -18,9 +18,11 @@
   html,body { margin:0; }
   section { scroll-margin-bottom:90px; } .botao, input, .moldura { scroll-margin-bottom:90px; }
   body { font-family:-apple-system,Roboto,Arial,sans-serif; background:var(--fundo); color:#222;
-         padding-bottom:calc(72px + env(safe-area-inset-bottom)); }
-  header { position:sticky; top:0; z-index:5; background:var(--cinza); color:#fff; border-bottom:3px solid var(--azul);
-           padding:calc(14px + env(safe-area-inset-top)) 16px 14px; font-size:18px; font-weight:600;
+         padding-top:env(safe-area-inset-top); padding-bottom:calc(72px + env(safe-area-inset-bottom)); }
+  /* faixa por trás da barra de estado do iPhone (hora/bateria), para nada ficar por baixo dela */
+  body::before { content:''; position:fixed; left:0; right:0; top:0; height:env(safe-area-inset-top); background:#fff; z-index:20; }
+  header { position:sticky; top:env(safe-area-inset-top); z-index:5; background:var(--cinza); color:#fff; border-bottom:3px solid var(--azul);
+           padding:14px 16px; font-size:18px; font-weight:600;
            display:flex; align-items:center; justify-content:space-between; }
   #rede { font-size:12px; font-weight:600; padding:4px 10px; border-radius:20px; background:rgba(255,255,255,.18); }
   #rede.off { background:var(--laranja); }
@@ -345,7 +347,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.4.6';
+var VERSAO = '1.4.7';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
