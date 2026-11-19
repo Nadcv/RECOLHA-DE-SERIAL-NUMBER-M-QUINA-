@@ -344,7 +344,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.4.1';
+var VERSAO = '1.4.2';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -665,7 +665,8 @@ function linhaServidor(it, estado) {
       '<div class="s">' + esc(it.serial) + '</div><div class="g">' + esc(it.grupo) + '</div>' +
       '<div class="m">' + esc([it.modelo, it.cliente].filter(Boolean).join(' · ')) + '</div></div>' +
       '<div class="dir">' + esc(it.data) + (it.fotos != null ? '<br>📷 ' + it.fotos : '') + (tag ? '<br>' + tag : '') + '</div></a>' +
-    (it.id ? '<button class="ed" title="Rever" onclick="abrirEditar(\'' + esc(it.id) + '\')">✏️</button>' : '') + '</div>';
+    (it.id ? '<button class="ed" title="Rever / editar etiqueta" onclick="abrirEditar(\'' + esc(it.id) + '\')">✏️</button>' +
+      '<button class="ed" title="Apagar este registo" onclick="apagarServidor(\'' + esc(it.id) + '\',\'' + esc(it.serial) + '\',this)">🗑️</button>' : '') + '</div>';
 }
 function desenharLista() {
   el('btRelatorio').style.display = abaAtual === 'porEnviar' ? 'block' : 'none';
@@ -839,6 +840,16 @@ function edRemover(bt) {
     alert('✔ Registo removido.'); mostrar('lista'); carregarLista(true);
   }).catch(function (e) { el('edEstado').textContent = '❌ ' + e.message; })
     .then(function () { bt.disabled = false; });
+}
+
+/* Apagar um serial já registado, diretamente na lista (ao lado de editar) */
+function apagarServidor(pastaId, serial, bt) {
+  if (!confirm('Apagar o registo do serial ' + serial + '?\n\nAs fotos e a ficha vão para o lixo do Google Drive (podem ser recuperadas durante 30 dias) e o registo sai da lista e da folha de cálculo.')) return;
+  bt.disabled = true; bt.textContent = '⏳';
+  api('remover', { pastaId: pastaId }).then(function () {
+    delete selecionados[pastaId]; cacheLista = null; resultadosPesquisa = null;
+    alert('✔ Registo ' + serial + ' apagado.'); carregarLista(true);
+  }).catch(function (e) { alert('❌ ' + e.message); bt.disabled = false; bt.textContent = '🗑️'; });
 }
 
 /* ---------------- Assinatura ---------------- */
