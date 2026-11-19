@@ -82,8 +82,8 @@ const CONFIG = {
   GEMINI_API_KEY: '',                       // chave grátis em aistudio.google.com: lê TUDO das etiquetas com IA
   GEMINI_MODELO: '',                        // vazio = escolhe automaticamente (flash-lite e, se falhar, flash)
   GEMINI_MAX_DIA: 200,                      // máximo de leituras por IA por dia (o resto usa OCR)                        // 2.ª folha com os dados lidos nas fotos
-  MOLDURA1: { largura: 400, altura: 228 },  // Foto 1 – etiqueta grande (placa de características)
-  MOLDURA2: { largura: 515, altura: 155 },  // Foto 2 – etiqueta pequena (código de barras)
+  MOLDURA1: { largura: 515, altura: 320 },  // Foto 1 – etiqueta grande (placa de características)
+  MOLDURA2: { largura: 515, altura: 175 },  // Foto 2 – etiqueta pequena (código de barras)
 };
 
 /* ===================== FUNÇÃO PRINCIPAL ===================== */
