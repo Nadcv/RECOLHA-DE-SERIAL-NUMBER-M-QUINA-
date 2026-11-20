@@ -311,7 +311,7 @@ function montarFolhaDados_(body, item) {
   const linhas = [['SERIAL NO', item.serial || '—'], [T_('INFORMAÇÃO DO GRUPO', 'GROUP INFORMATION'), item.grupo || '—']]
     .concat([[T_('Cliente / Obra', 'Customer / Site'), x.cliente], [T_('Local', 'Location'), x.local],
              [T_('Técnico', 'Technician'), x.tecnico],
-             [T_('Coordenadas GPS', 'GPS coordinates'), x.gps ? x.gps.lat.toFixed(5) + ', ' + x.gps.lon.toFixed(5) : ''],
+             // coordenadas GPS: não aparecem no PDF (ficam só na folha de registo e no mapa da ficha)
              [T_('Garantia (estimada)', 'Warranty (estimated)'), gar ? gar.texto : '']].filter(l => l[1]))
     .concat(lidos.map(([n, v]) => [String(n), String(v || '—')]));
   const blocoExtra = !!(item.foto3 || item.assinatura);
