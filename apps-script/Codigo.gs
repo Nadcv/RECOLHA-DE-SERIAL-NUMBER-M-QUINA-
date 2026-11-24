@@ -1028,7 +1028,7 @@ function paginaHtml_(conteudo, titulo) {
     .grupo{font-size:26px;font-weight:700}
     table{width:100%;border-collapse:collapse;font-size:15px}
     th{text-align:left;color:#555;font-weight:600;padding:7px 8px 7px 0;width:42%;vertical-align:top}
-    td{padding:7px 0;word-break:break-all;font-family:monospace;font-size:15px}
+    td{padding:7px 0;word-break:break-word;font-size:15px;font-weight:600;color:#222}
     tr+tr th,tr+tr td{border-top:1px solid #eee}
     img{width:100%;border-radius:8px;margin-top:8px;display:block}
     img.zoom{position:fixed;inset:0;margin:0;width:100vw;height:100vh;object-fit:contain;background:#000;z-index:9;border-radius:0}
