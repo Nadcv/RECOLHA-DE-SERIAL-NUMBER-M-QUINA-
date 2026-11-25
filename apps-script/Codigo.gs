@@ -170,7 +170,7 @@ function enviarRelatorio__(ids, emails) {
     htmlBody: corpoEmail_(itens, quandoTxt),
     body: textoEmail_(itens, quandoTxt),
     attachments: [pdf],
-    inlineImages: CONFIG.LOGOTIPOS ? { logoCablotec: logoBlob_('cablotec'), logoCliente: logoBlob_('aralab') } : {},
+    inlineImages: CONFIG.LOGOTIPOS ? { logoCablotec: logoBlob_('cablotec') } : {},
   });
 
   // 4) Ficha individual dentro da pasta de cada serial (sempre em português)
@@ -377,10 +377,6 @@ function cabecalhoLogos_(body) {
     const pe = c[0].getChild(0).asParagraph();
     const le = pe.appendInlineImage(logoBlob_('cablotec'));
     le.setWidth(Math.round(24 * le.getWidth() / le.getHeight())).setHeight(24);
-    const pd = c[1].getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
-    pd.appendText(T_('Cliente  ', 'Customer  ')).setFontSize(7).setForegroundColor('#888888').setBold(false);
-    const ld = pd.appendInlineImage(logoBlob_('aralab'));
-    ld.setWidth(Math.round(20 * ld.getWidth() / ld.getHeight())).setHeight(20);
     const linha = body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(2);
     linha.appendHorizontalRule();
     linha.editAsText().setFontSize(2);
@@ -781,11 +777,6 @@ function corpoEmail_(itens, quando) {
   ${CONFIG.LOGOTIPOS ? `<tr><td style="padding:18px 28px 14px;border-bottom:4px solid ${azul}">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       <td align="left" style="vertical-align:middle"><img src="cid:logoCablotec" alt="Cablotec" height="44" style="display:block;height:44px;border:0"></td>
-      <td align="right" style="vertical-align:middle;font-size:11px;color:#888">
-        <table role="presentation" cellpadding="0" cellspacing="0" align="right"><tr>
-          <td style="font-size:11px;color:#888;padding-right:8px;vertical-align:middle">${T_('Preparado para', 'Prepared for')}</td>
-          <td style="vertical-align:middle"><img src="cid:logoCliente" alt="${esc_(CONFIG.CLIENTE_NOME || '')}" height="34" style="display:block;height:34px;border:0"></td>
-        </tr></table></td>
     </tr></table></td></tr>` : ''}
   <tr><td style="background:#3a393a;padding:18px 28px">
     <div style="font-size:20px;font-weight:bold;color:#ffffff">${T_('Relatório de Registo de Equipamentos', 'Equipment Registration Report')}</div>
@@ -977,8 +968,7 @@ function doGet(e) {
   }).join('');
 
   const html = `
-    ${CONFIG.LOGOTIPOS ? `<div class="marcas"><img src="${logoDataUri_('cablotec')}" alt="Cablotec">
-      <span><small>Cliente</small><img src="${logoDataUri_('aralab')}" alt="${esc_(CONFIG.CLIENTE_NOME || '')}"></span></div>` : ''}
+    ${CONFIG.LOGOTIPOS ? `<div class="marcas"><img src="${logoDataUri_('cablotec')}" alt="Cablotec"></div>` : ''}
     <header>${esc_(CONFIG.TITULO_PAGINA)}</header>
     <div class="card destaque">
       <div class="rotulo">SERIAL NO</div>
