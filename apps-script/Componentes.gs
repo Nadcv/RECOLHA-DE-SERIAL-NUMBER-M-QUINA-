@@ -130,17 +130,24 @@ function camposOCRComponente_(k, texto) {
     add('Material do corpo', m(/Mat\.?\s*Body\s*:?\s*([A-Za-z ]+?)(?:\n|$)/i));
     add('Marcação CE (organismo)', m(/^\s*(0\d{3})\s*$/m));
   } else if (k === 'compressor') {
-    if (/Danfoss/i.test(t)) out.fabricante = add('Fabricante', 'Danfoss');
-    out.modelo = add('Modelo (Model no)', m(/Model\s*no\.?\s*:?\s*([A-Z0-9]{8,})/i) || m(/\b([LM]LZ\d{3}[A-Z0-9]{4,})\b/));
+    if (/Danfoss|Dankor|Danfo|Dantoss/i.test(t) || /\b[LM]LZ[0O]\d{2}/.test(t)) out.fabricante = add('Fabricante', 'Danfoss');
+    out.modelo = add('Modelo (Model no)', (m(/Model\s*no\.?\s*:?\s*([A-Z0-9]{8,})/i) || m(/\b([LM]LZ[0O]\d{2}[A-Z0-9]{4,})\b/)).replace(/^([LM]LZ)O/, '$10'));
     out.serial = add('Nº de série (Serial no)', m(/Serial\s*no\.?\s*:?\s*([A-Z]{2}\d{8,})/i) || m(/\b([A-Z]{2}\d{10})\b/));
     add('Tech no', m(/Tech\s*no\.?\s*:?\s*([A-Z0-9]{6,})/i));
-    add('Alimentação', todos(/\d{3}(?:\s*-\s*\d{3})?\s*V\s*3\s*~\s*\d{2}\s*Hz/gi).join(' · '));
+    add('Alimentação', todos(/\d{3}(?:\s*-\s*\d{3})?\s*V\s*3\s*[~\-]\s*\d{2}\s*Hz/gi).join(' · '));
     add('Corrente de arranque (LR)', m(/LR\s*:?\s*(\d+\s*A)/i));
     add('Corrente máx. (MAX OPER)', m(/MAX\s*OPER\.?\s*:?\s*([\d.,]+\s*A)/i));
     add('Óleo (Lubricant)', m(/Lubricant\s*:?\s*([A-Z]+\s*\/\s*[\d.,]+\s*L)/i));
     add('Refrigerante', m(/Refrigerant\s*:?\s*([^\n]+)/i));
-    const ps = t.match(/PS\s+([\d.,]+\s*bar)\s+([\d.,]+\s*bar)/i);
-    if (ps) { add('PS lado LP', ps[1]); add('PS lado HP', ps[2]); }
+    const bars = todos(/\b\d{1,2}[.,]\d{1,2}\s*bar\b/gi);
+    if (bars.length >= 2) { add('PS – lado de baixa (LP)', bars[0]); add('PS – lado de alta (HP)', bars[1]); }
+    const temps = (t.match(/-?\d{1,3}\s*°\s*C/g) || []).map(x => x.replace(/\s+/g, ' '));
+    const tmax = temps.filter(x => !/^-/.test(x)), tmin = temps.filter(x => /^-/.test(x));
+    if (tmax[0]) add('TS máx. – lado LP', tmax[0]); if (tmax[1]) add('TS máx. – lado HP', tmax[1]);
+    if (tmin[0]) add('TS mín. – lado LP', tmin[0]); if (tmin[1]) add('TS mín. – lado HP', tmin[1]);
+    const vols = t.split('\n').filter(l => !/lubric/i.test(l)).join('\n').match(/\b\d[.,]\d{1,2}\s*L\b/g) || [];
+    if (vols[0]) add('Volume – lado LP', vols[0]); if (vols[1]) add('Volume – lado HP', vols[1]);
+    if (/P\.?\s*E\.?\s*D/i.test(t)) add('Diretiva', 'P.E.D. (equipamentos sob pressão)');
     add('Fabricado em', m(/MADE\s*IN\s*([A-Z]+)/i));
   } else if (k === 'unidade') {
     if (/Danfoss/i.test(t) || /114X\d{4}/.test(t)) out.fabricante = add('Fabricante', 'Danfoss');
@@ -148,9 +155,10 @@ function camposOCRComponente_(k, texto) {
     out.codigo = add('Código', m(/\b(114X\d{4})\b/));
     out.serial = add('Nº de série', m(/Serial\s*No\.?[:\-.\s]*([A-Z0-9]{8,})/i) || m(/\b(HTPL[\d-]+)/));
     add('EAN', m(/\b(\d{13})\b/));
-    add('Alimentação', m(/(\d{3}\s*V\s*3N?\s*~\s*\d{2}\s*Hz)/i));
-    add('Refrigerantes (1)', m(/\(1\)\s*([^\n(]+)/));
-    add('Refrigerantes (2)', m(/\(2\)\s*([^\n]+)/));
+    add('Alimentação', m(/(\d{3}\s*V\s*3N?\s*~\s*\d{2}\s*Hz)/i) || (m(/Voltage\s*:?\s*([^\n]+)/i) + (/^\s*50\s*Hz\s*$/m.test(t) && !/Hz/i.test(m(/Voltage\s*:?\s*([^\n]+)/i)) ? ' ~ 50 Hz' : '')));
+    add('Refrigerantes – grupo 1', m(/\(1\)\s*([^\n(]+)/) || m(/Group\s*1\s*:?\s*([^\n]+)/i));
+    add('Refrigerantes – grupo 2', m(/\(2\)\s*([^\n]+)/) || m(/Group\s*2\s*:?\s*([^\n]+)/i));
+    add('Referência Danfoss', m(/\b(118A\d{4})\b/));
     add('Desenho (DW)', m(/DW\s*:?\s*-?\s*([A-Z0-9]+(?:\s*REV\.?\s*\d+)?)/i));
     const dt = m(/DATE\s*:?\s*-?\s*(\d{2}-\d{2}-\d{4})/i); if (dt) { add('Data', dt); out.ano = dt.slice(-4); }
     add('Fabricado em', m(/MADE\s*IN\s*([A-Z]+)/i));
@@ -160,7 +168,13 @@ function camposOCRComponente_(k, texto) {
     add('P/N', m(/P\/N\s*:?\s*(\d{5,})/i));
     out.serial = add('Nº de série', m(/S\/N\s*:?\s*([\d\/]{6,})/i) || m(/\b(22\d{8}|0\d{7})\b/));
     add('Código Danfoss', m(/(118A\d{4}\s*\/\s*118U\d{4})/));
-    add('Alimentação', m(/(1\s*~\s*\d{3}(?:\s*-\s*\d{3})?\s*V[^\n]*?Hz)/i) || todos(/\d{3}V\s+\d{2}Hz\s*[\d.,]+A/gi).join(' · '));
+    add('Alimentação', m(/(1\s*~\s*\d{3}(?:\s*-\s*\d{3})?\s*V[^\n]*?Hz)/i) || m(/\b(\d{3}(?:-\d{3})?\s*V\s+\d{2}(?:-\d{2})?\s*Hz)/i) || todos(/\d{3}V\s+\d{2}Hz\s*[\d.,]+A/gi).join(' · '));
+    add('Código de produção', m(/\b(\d{4}-\d-\d{4})\b/));
+    add('Temperatura ambiente máx.', m(/max\.?\s*amb\.?\s*(\d+\s*°\s*C)/i));
+    add('Classe de isolamento', m(/Ins\.?\s*cl\.?\s*(\d{3})/i) || m(/THCL\s*(\d{3})/i));
+    add('Massa', m(/m\s*=\s*([\d.,]+\s*kg)/i));
+    add('Eficiência (ErP)', m(/(Eff\w*\s*=\s*[\d.,]+\s*%[^\n]*?N\s*=\s*[\d.,]+)/i) || m(/(statA\s*=\s*[\d.,]+\s*%)/i));
+    add('País de fabrico', m(/Made\s*in\s*([A-Za-zé]+)/i));
     add('Potência', todos(/\b\d{2,4}\s*W\b/g).join(' · '));
     add('Corrente', m(/\b([\d.,]+(?:\s*-\s*[\d.,]+)?\s*A)\b/));
     add('Rotação', todos(/\b\d{3,4}\s*(?:RPM|rpm|min)/g).join(' · '));
@@ -170,8 +184,10 @@ function camposOCRComponente_(k, texto) {
   } else if (k === 'controlador') {
     if (/Danfoss|Optyma|084B/i.test(t)) out.fabricante = add('Fabricante', 'Danfoss');
     out.modelo = add('Modelo', /Optyma/i.test(t) ? 'Optyma Plus Controller' : '');
-    out.codigo = add('Código', m(/\b(084B\d{4})\b/));
-    out.serial = add('Nº da etiqueta (código de barras)', m(/\b(084B\d{4}\d{5,}[A-Z]{2}\d{2,})\b/));
+    out.codigo = add('Código', m(/\b(084B\d{4})(?!\d)/));
+    out.serial = add('Nº da etiqueta (código de barras)', m(/(084B\d{4}\d{5,}[A-Z]{2}\d{2,})/));
+    if (!out.codigo && out.serial) out.codigo = add('Código', out.serial.slice(0, 8));
+    if (!out.modelo && /084B8080/.test(t)) out.modelo = add('Modelo', 'Optyma Plus Controller');
     add('Versão do firmware', m(/(PV\s?\d{2}\s*\/\s*SW\s*\d[.,\s]?\d{2})/i).replace(/\s+/g, ''));
     add('Alimentação', m(/(230\s*V\s*AC)/i));
   } else if (k === 'evaporador') {
@@ -267,6 +283,23 @@ function migrarComponentesAntigos_() {
   props.setProperty('COMP_MIGRADO', '1');
 }
 
+/** Leituras antigas ("Linha 1", "Linha 2"…): volta a identificar os campos a partir do texto já lido. */
+function compNormalizar_(k, r) {
+  if (!r || !(r.campos || []).some(c => /^Linha \d+$/.test(c[0]))) return false;
+  const texto = r.campos.map(c => c[1]).join('\n');
+  const n = camposOCRComponente_(k, texto);
+  r.campos = n.campos; r.fonte = 'OCR';
+  ['fabricante', 'modelo', 'codigo', 'serial', 'ano'].forEach(x => { r[x] = n[x] || ''; });
+  return true;
+}
+function compNormalizarTodos_(pasta, d) {
+  if (!d || !d.itens) return d;
+  let mudou = false;
+  Object.keys(d.itens).forEach(k => { if (compNormalizar_(k, d.itens[k])) mudou = true; });
+  if (mudou && pasta) compGuardar_(pasta, d);
+  return d;
+}
+
 /** POST componentes: definições + o que já foi lido para um serial (Grupo e Clico). */
 function apiComponentes_(serial) {
   try { migrarComponentesAntigos_(); } catch (e) { Logger.log('Migração componentes: ' + e.message); }
@@ -274,7 +307,7 @@ function apiComponentes_(serial) {
   let s = '';
   try { s = compSerial_(serial); } catch (e) { return r; }
   ['grupo', 'clico'].forEach(t => {
-    const d = compLer_(compPasta_(s, t, false));
+    const pt = compPasta_(s, t, false), d = compNormalizarTodos_(pt, compLer_(pt));
     if (d) { r.componentes[t] = d.itens || {}; r.info[t] = { grupo: d.grupo || '', enviadoEm: d.enviadoEm || '', enviadoPara: d.enviadoPara || '' }; }
   });
   return r;
@@ -300,7 +333,7 @@ function apiComponenteCorrigir_(pin, req) {
 function apiEnviarComponentes_(pin, req) {
   const user = verificarPin_(pin);
   const tipo = compTipo_(req.tipo), serial = compSerial_(req.serial), pasta = compPasta_(serial, tipo, false);
-  const d = compLer_(pasta);
+  const d = compNormalizarTodos_(pasta, compLer_(pasta));
   const ks = d ? (COMPONENTES_[tipo] || []).map(c => c.k).filter(k => d.itens && d.itens[k]) : [];
   if (!ks.length) throw new Error('Ainda não há etiquetas lidas para este serial.');
   const emails = validarEmails_(req.emails);
