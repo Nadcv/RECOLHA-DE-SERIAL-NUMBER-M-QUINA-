@@ -380,7 +380,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.5.1';
+var VERSAO = '1.5.2';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -584,8 +584,12 @@ function desenharComponentes() {
 }
 function cartaoEnvioComp(n) {
   var inf = compInfo[compTipo] || {}, guard = localStorage.getItem('emailComp') || localStorage.getItem('ultimoEmail') || '';
-  return '<div class="card"><label>📧 ENVIAR POR E-MAIL <small>(PDF só com as etiquetas dos componentes)</small></label>' +
+  return '<div class="card"><label>📧 ENVIAR POR E-MAIL <small>(relatório técnico das etiquetas dos componentes)</small></label>' +
     '<input id="cEmail" type="email" autocomplete="email" placeholder="email@exemplo.pt (vários separados por vírgula)" value="' + esc(guard) + '">' +
+    '<div style="display:flex;gap:14px;margin-top:8px;font-size:14px">' + [['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel']].map(function (f) {
+      var on = (localStorage.getItem('fmtComp') || 'pdf,docx,xlsx').split(',').indexOf(f[0]) >= 0;
+      return '<label style="display:flex;align-items:center;gap:5px;margin:0;font-weight:600;color:#333"><input type="checkbox" class="cFmt" value="' + f[0] + '"' + (on ? ' checked' : '') + (f[0] === 'pdf' ? ' disabled checked' : '') + ' style="width:18px;height:18px">' + f[1] + '</label>';
+    }).join('') + '</div>' +
     '<button class="botao" style="margin-top:8px" onclick="enviarComponentes()"' + (n ? '' : ' disabled') + '>📧 Enviar etiquetas (' + n + ')</button>' +
     '<p class="dica" id="cEnvMsg">' + (inf.enviadoEm ? '✔ Enviado em ' + esc(inf.enviadoEm) + ' para ' + esc(inf.enviadoPara) : (n ? 'Se deixar o e-mail vazio, vai para o e-mail habitual.' : 'Leia primeiro as etiquetas.')) + '</p></div>';
 }
@@ -594,9 +598,12 @@ function enviarComponentes() {
   if (!s) return alert('Escreva o SERIAL NO.');
   try { if (em) localStorage.setItem('emailComp', em); } catch (e) {}
   el('cEnvMsg').textContent = '⏳ A preparar o PDF e a enviar…';
-  api('enviarComponentes', { serial: s, tipo: compTipo, emails: em }).then(function (r) {
+  var fmt = Array.prototype.slice.call(document.querySelectorAll('.cFmt')).filter(function (x) { return x.checked; }).map(function (x) { return x.value; });
+  try { localStorage.setItem('fmtComp', fmt.join(',')); } catch (e) {}
+  api('enviarComponentes', { serial: s, tipo: compTipo, emails: em, formatos: fmt }).then(function (r) {
     compInfo[compTipo] = compInfo[compTipo] || {}; compInfo[compTipo].enviadoEm = r.enviadoEm; compInfo[compTipo].enviadoPara = r.enviadoPara;
-    el('cEnvMsg').textContent = '✔ Enviado para ' + r.enviadoPara; if (navigator.vibrate) navigator.vibrate(60);
+    el('cEnvMsg').textContent = '✔ Enviado para ' + r.enviadoPara + ' (' + (r.formatos || ['PDF']).join(', ') + ')' + ((r.falhas || []).length ? ' – não foi possível gerar: ' + r.falhas.join(', ') : '');
+    if (navigator.vibrate) navigator.vibrate(60);
   }).catch(function (e) { el('cEnvMsg').textContent = '❌ ' + e.message; });
 }
 function fotoComponente(input, k) {

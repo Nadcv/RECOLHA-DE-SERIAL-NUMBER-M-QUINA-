@@ -340,7 +340,14 @@ function apiEnviarComponentes_(pin, req) {
   const para = emails || CONFIG.EMAIL_DESTINO;
   const nomeTipo = tipo === 'clico' ? 'Clico' : 'Grupo';
   d.revisao = (d.enviadoEm ? (Number(d.revisao) || 0) + 1 : 0);
-  const pdf = compPdf_(serial, tipo, d, ks, user).setName('Etiquetas_componentes_' + nomeTipo + '_' + serial.replace(/[^A-Z0-9]+/g, '_') + '.pdf');
+  const base = compDocNum_(serial, tipo) + '_Rev' + ('0' + (Number(d.revisao) || 0)).slice(-2) + '_Etiquetas_componentes';
+  const fmt = Array.isArray(req.formatos) && req.formatos.length ? req.formatos : ['pdf'];
+  const anexos = [], falhas = [];
+  if (fmt.indexOf('pdf') >= 0) anexos.push(compPdf_(serial, tipo, d, ks, user).setName(base + '.pdf'));
+  if (fmt.indexOf('docx') >= 0) { try { anexos.push(compDocx_(serial, tipo, d, ks, user, pasta).setName(base + '.docx')); } catch (x) { Logger.log('Word: ' + x.message); falhas.push('Word'); } }
+  if (fmt.indexOf('xlsx') >= 0) { try { anexos.push(compXlsx_(serial, tipo, d, ks, pasta).setName(base + '.xlsx')); } catch (x) { Logger.log('Excel: ' + x.message); falhas.push('Excel'); } }
+  if (!anexos.length) anexos.push(compPdf_(serial, tipo, d, ks, user).setName(base + '.pdf'));
+  const nomesFmt = anexos.map(a => /\.pdf$/.test(a.getName()) ? 'PDF' : /\.docx$/.test(a.getName()) ? 'Word' : 'Excel');
   const e = esc_, vermelho = '#c9272e', cinza = '#3a393a';
   const linhas = ks.map(k => { const r = d.itens[k]; return `<tr><td style="padding:8px 10px;border-bottom:1px solid #e3e6ee;font-size:13px;font-weight:bold">${e(r.nome)}</td>` +
     `<td style="padding:8px 10px;border-bottom:1px solid #e3e6ee;font-size:13px">${e(r.modelo || '—')}</td>` +
@@ -351,7 +358,7 @@ function apiEnviarComponentes_(pin, req) {
 <tr><td style="padding:18px 28px 14px;border-bottom:4px solid ${vermelho}"><img src="cid:logoCablotec" alt="Cablotec" height="44" style="display:block;height:44px;border:0"></td></tr>
 <tr><td style="background:${cinza};padding:18px 28px"><div style="font-size:20px;font-weight:bold;color:#fff">Etiquetas dos componentes – ${nomeTipo}</div><div style="font-size:13px;color:#d6d6d6;margin-top:4px">Serial ${e(serial)}${d.grupo ? ' · ' + e(d.grupo) : ''}</div></td></tr>
 <tr><td style="padding:26px 28px 6px"><p style="margin:0 0 14px;font-size:14px;color:#222">Exmos. Senhores,</p>
-<p style="margin:0 0 18px;font-size:14px;color:#222;line-height:1.55">Vimos por este meio remeter o registo das etiquetas dos componentes do ${nomeTipo.toLowerCase()} abaixo identificado, com o modelo e o número de série de cada componente. Segue em anexo o documento em formato PDF com todos os dados lidos e as fotografias das etiquetas.</p>
+<p style="margin:0 0 18px;font-size:14px;color:#222;line-height:1.55">Vimos por este meio remeter o registo das etiquetas dos componentes do ${nomeTipo.toLowerCase()} abaixo identificado, com o modelo e o número de série de cada componente. Segue em anexo o relatório técnico (${nomesFmt.join(', ').replace(/, ([^,]*)$/, ' e $1')}) com todos os dados lidos${nomesFmt.indexOf('Excel') >= 0 ? ', incluindo uma folha Excel para tratamento dos dados' : ''}.</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e3e6ee"><tr><th style="${th}">Componente</th><th style="${th}">Modelo</th><th style="${th}">Nº de série</th></tr>${linhas}</table></td></tr>
 <tr><td style="padding:20px 28px 4px"><p style="margin:0 0 22px;font-size:14px;color:#222">Ficamos ao dispor para qualquer esclarecimento adicional.</p><p style="margin:0 0 4px;font-size:14px;color:#222">Com os melhores cumprimentos,</p></td></tr>
 <tr><td style="padding:10px 28px 26px"><div style="border-left:4px solid ${vermelho};padding:4px 0 4px 12px"><div style="font-size:15px;font-weight:bold;color:${vermelho}">Aplicação Cablotec</div><div style="font-size:13px;color:#555">Etiquetas dos componentes${user && user.nome ? ' · ' + e(user.nome) : ''}</div><div style="font-size:12px;color:#888;margin-top:2px">Cablotec – Cablagens e Sistemas, Lda</div></div></td></tr>
@@ -359,10 +366,10 @@ function apiEnviarComponentes_(pin, req) {
 </table></td></tr></table></body></html>`;
   MailApp.sendEmail({ to: para, subject: 'Cablotec – Etiquetas dos componentes – ' + nomeTipo + ' – Serial ' + serial,
     body: 'Etiquetas dos componentes do ' + nomeTipo + ' (serial ' + serial + ') em anexo (PDF).',
-    htmlBody: html, inlineImages: { logoCablotec: logoBlob_('cablotec') }, name: 'Cablotec – Etiquetas dos componentes', attachments: [pdf] });
+    htmlBody: html, inlineImages: { logoCablotec: logoBlob_('cablotec') }, name: 'Cablotec – Etiquetas dos componentes', attachments: anexos });
   d.enviadoEm = agora_(); d.enviadoPara = para;
   compGuardar_(pasta, d);
-  return { enviadoPara: para, enviadoEm: d.enviadoEm };
+  return { enviadoPara: para, enviadoEm: d.enviadoEm, formatos: nomesFmt, falhas };
 }
 
 /** Nº do documento técnico: ETC-<serial>-G|C */
@@ -377,8 +384,8 @@ function compSecaoCampo_(nome, valor) {
   return 'out';
 }
 
-/** PDF em formato de documento técnico de engenharia. */
-function compPdf_(serial, tipo, d, ks, user) {
+/** HTML do documento técnico de engenharia (usado no PDF e no Word). */
+function compHtml_(serial, tipo, d, ks, user, semFotos) {
   const e = esc_, nomeTipo = tipo === 'clico' ? 'Clico' : 'Grupo';
   const doc = compDocNum_(serial, tipo), rev = ('0' + (Number(d.revisao) || 0)).slice(-2), hoje = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
   const leituras = ks.map(k => d.itens[k]);
@@ -419,7 +426,7 @@ function compPdf_(serial, tipo, d, ks, user) {
     const r = d.itens[k], grupos = { id: [], ele: [], pt: [], out: [] };
     (r.campos || []).forEach(c => grupos[compSecaoCampo_(c[0], c[1])].push(c));
     let img = '';
-    try { if (r.fotoId) { const b = miniatura_(DriveApp.getFileById(r.fotoId), 700); img = '<img class="fig" src="data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes()) + '"><div class="cap">Fig. ' + (i + 1) + ' – Etiqueta: ' + e(r.nome.toLowerCase()) + '</div>'; } } catch (x) {}
+    try { if (r.fotoId && !semFotos) { const b = miniatura_(DriveApp.getFileById(r.fotoId), 700); img = '<img class="fig" src="data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes()) + '"><div class="cap">Fig. ' + (i + 1) + ' – Etiqueta: ' + e(r.nome.toLowerCase()) + '</div>'; } } catch (x) {}
     h += '<div class="comp"><h3>3.' + (i + 1) + ' ' + e(r.nome) + (r.fabricante ? ' – ' + e(r.fabricante) : '') + '</h3><table style="width:100%"><tr><td style="vertical-align:top;padding-right:10px">' +
       ['id', 'ele', 'pt', 'out'].filter(g => grupos[g].length).map(g => '<h4>' + nomesSec[g] + '</h4><table class="g">' +
         grupos[g].map(c => '<tr><td class="n">' + e(c[0]) + '</td><td' + (/s[ée]rie|serial/i.test(c[0]) ? ' class="mono ser"' : '') + '>' + e(c[1]) + '</td></tr>').join('') + '</table>').join('') +
@@ -438,5 +445,61 @@ function compPdf_(serial, tipo, d, ks, user) {
   h += '<h2>5. Aprovação</h2><table class="aprov" style="width:100%"><tr><td style="width:33%"><b>Elaborado por</b><br>' + e(tecnicos) + '<br><span style="color:#777">Data: ' + hoje + '</span></td>' +
     '<td style="width:33%"><b>Verificado por</b><br><br><span style="color:#777">Data: ____/____/______</span></td><td><b>Aprovado por</b><br><br><span style="color:#777">Data: ____/____/______</span></td></tr></table>';
   h += '<p style="margin-top:10px;font-size:7.2pt;color:#666;border-top:1px solid #999;padding-top:4px">' + e(doc) + ' · Rev. ' + rev + ' · Cablotec – Cablagens e Sistemas, Lda · Documento gerado pela Aplicação Cablotec a partir das etiquetas dos componentes.</p></body></html>';
-  return HtmlService.createHtmlOutput(h).getAs(MimeType.PDF);
+  return h;
+}
+function compPdf_(serial, tipo, d, ks, user) {
+  return HtmlService.createHtmlOutput(compHtml_(serial, tipo, d, ks, user)).getAs(MimeType.PDF);
+}
+
+/** Exporta um ficheiro Google (Docs/Sheets) para Word/Excel e apaga o temporário. */
+function compExportar_(id, mime) {
+  try {
+    const res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '/export?mimeType=' + encodeURIComponent(mime),
+      { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
+    return res.getBlob();
+  } finally { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) {} }
+}
+
+/** Word (.docx): o mesmo documento técnico, editável, com as fotografias das etiquetas em anexo. */
+function compDocx_(serial, tipo, d, ks, user, pasta) {
+  const html = compHtml_(serial, tipo, d, ks, user, true);
+  const f = Drive.Files.create({ name: 'tmp_etc_' + serial, mimeType: MimeType.GOOGLE_DOCS, parents: [pasta.getId()] },
+                               Utilities.newBlob(html, 'text/html', 'doc.html'));
+  try {
+    const doc = DocumentApp.openById(f.id), body = doc.getBody();
+    body.appendPageBreak();
+    body.appendParagraph('ANEXO – FOTOGRAFIAS DAS ETIQUETAS').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    ks.forEach((k, i) => {
+      const r = d.itens[k];
+      if (!r.fotoId) return;
+      try {
+        body.appendParagraph('Fig. ' + (i + 1) + ' – ' + r.nome).setBold(true);
+        const im = body.appendParagraph('').appendInlineImage(miniatura_(DriveApp.getFileById(r.fotoId), 900));
+        const w = 300, k2 = w / im.getWidth(); im.setWidth(w).setHeight(Math.round(im.getHeight() * k2));
+      } catch (e) { Logger.log('Foto no Word: ' + e.message); }
+    });
+    doc.saveAndClose();
+  } catch (e) { Logger.log('Word (fotos): ' + e.message); }
+  return compExportar_(f.id, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+}
+
+/** Excel (.xlsx): resumo dos componentes + todos os dados (componente, secção, campo, valor). */
+function compXlsx_(serial, tipo, d, ks, pasta) {
+  const nomesSec = { id: 'Identificação', ele: 'Dados elétricos', pt: 'Pressão, temperatura e fluidos', out: 'Outros dados' };
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const linhas = [
+    ['Relatório técnico – Identificação dos componentes – ' + (tipo === 'clico' ? 'Clico' : 'Grupo')],
+    ['Documento nº', compDocNum_(serial, tipo), 'Revisão', ('0' + (Number(d.revisao) || 0)).slice(-2)],
+    ['Nº de série do equipamento', serial, 'Modelo / grupo', d.grupo || ''],
+    [],
+    ['Item', 'Componente', 'Fabricante', 'Modelo / referência', 'Nº de série', 'Ano', 'Lida em', 'Técnico'],
+  ];
+  ks.forEach((k, i) => { const r = d.itens[k]; linhas.push([i + 1, r.nome, r.fabricante || '', r.modelo || r.codigo || '', r.serial || '', r.ano || '', r.lidoEm || '', r.por || '']); });
+  linhas.push([], ['Componente', 'Secção', 'Campo', 'Valor']);
+  ks.forEach(k => { const r = d.itens[k]; (r.campos || []).forEach(c => linhas.push([r.nome, nomesSec[compSecaoCampo_(c[0], c[1])], c[0], c[1]])); });
+  const csv = '\ufeff' + linhas.map(l => l.map(q).join(',')).join('\r\n');
+  const f = Drive.Files.create({ name: 'tmp_etc_' + serial, mimeType: MimeType.GOOGLE_SHEETS, parents: [pasta.getId()] },
+                               Utilities.newBlob(csv, 'text/csv', 'dados.csv'));
+  return compExportar_(f.id, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
