@@ -306,7 +306,8 @@ function apiEnviarComponentes_(pin, req) {
   const emails = validarEmails_(req.emails);
   const para = emails || CONFIG.EMAIL_DESTINO;
   const nomeTipo = tipo === 'clico' ? 'Clico' : 'Grupo';
-  const pdf = compPdf_(serial, tipo, d, ks).setName('Etiquetas_componentes_' + nomeTipo + '_' + serial.replace(/[^A-Z0-9]+/g, '_') + '.pdf');
+  d.revisao = (d.enviadoEm ? (Number(d.revisao) || 0) + 1 : 0);
+  const pdf = compPdf_(serial, tipo, d, ks, user).setName('Etiquetas_componentes_' + nomeTipo + '_' + serial.replace(/[^A-Z0-9]+/g, '_') + '.pdf');
   const e = esc_, vermelho = '#c9272e', cinza = '#3a393a';
   const linhas = ks.map(k => { const r = d.itens[k]; return `<tr><td style="padding:8px 10px;border-bottom:1px solid #e3e6ee;font-size:13px;font-weight:bold">${e(r.nome)}</td>` +
     `<td style="padding:8px 10px;border-bottom:1px solid #e3e6ee;font-size:13px">${e(r.modelo || '—')}</td>` +
@@ -331,36 +332,78 @@ function apiEnviarComponentes_(pin, req) {
   return { enviadoPara: para, enviadoEm: d.enviadoEm };
 }
 
-/** PDF (HTML → PDF): resumo por componente (fabricante, modelo, nº de série, ano) + dados + foto. */
-function compPdf_(serial, tipo, d, ks) {
+/** Nº do documento técnico: ETC-<serial>-G|C */
+function compDocNum_(serial, tipo) { return 'ETC-' + serial.replace(/[^A-Z0-9]+/g, '') + '-' + (tipo === 'clico' ? 'C' : 'G'); }
+
+/** Classifica um campo por secção técnica. */
+function compSecaoCampo_(nome, valor) {
+  const n = String(nome), v = String(valor);
+  if (/fabrico|n[ºo°]\s|fabricante|modelo|s[ée]rie|serial|c[óo]digo|tipo|type|ean|p\/n|artigo|art\b|ano|data|lote|produto|desenho|dw\b|n[ºo°]\b|tech|marca[çc][ãa]o|vers[ãa]o|firmware|origem|fabricado|descri[çc][ãa]o/i.test(n)) return 'id';
+  if (/aliment|tens[ãa]o|corrente|pot[êe]ncia|rota[çc][ãa]o|frequ|resist|\bLR\b|max oper|velocidade|vsd|prote[çc][ãa]o|\bIP\b|el[ée]tric|condensador|µF/i.test(n) || /\b\d+\s*(V|Hz|W|A|rpm|RPM)\b/.test(v)) return 'ele';
+  if (/press|\bPS\b|\bPT\b|\bTS\b|temperat|volume|bar|fluido|categoria|exclu|refrigerante|[óo]leo|lubric|material/i.test(n) || /\bbar\b|°C/.test(v)) return 'pt';
+  return 'out';
+}
+
+/** PDF em formato de documento técnico de engenharia. */
+function compPdf_(serial, tipo, d, ks, user) {
   const e = esc_, nomeTipo = tipo === 'clico' ? 'Clico' : 'Grupo';
-  let h = '<html><head><meta charset="utf-8"><style>@page{size:A4;margin:13mm 12mm}body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#222}' +
-    'h1{font-size:15pt;margin:0;color:#3a393a}.sub{font-size:9pt;color:#666}' +
-    'table{border-collapse:collapse}.res{width:100%;margin:6px 0 4px}.res th{color:#3a393a;border-bottom:1.5px solid #3a393a;font-size:8.5pt;text-align:left;padding:5px 6px}' +
-    '.res td{border-bottom:1px solid #ddd;padding:5px 6px;font-size:9pt}.res td.s{font-family:Courier New,monospace;color:#c9272e;font-weight:bold}' +
-    '.bloco{page-break-inside:avoid;margin-top:12px;border:1px solid #ddd;border-left:4px solid #c9272e;padding:8px 10px}' +
-    '.bloco h2{font-size:11pt;margin:0 0 6px;color:#3a393a}.chips td{padding:0 14px 6px 0;vertical-align:top}.chips small{display:block;color:#888;font-size:7.5pt;text-transform:uppercase}' +
-    '.chips b{font-size:10pt}.d{width:100%}.d td{border-top:1px solid #eee;padding:3px 4px;vertical-align:top;font-size:8.8pt}.d td.n{width:42%;color:#555}' +
-    '.foto{max-width:240px;max-height:180px;border:1px solid #ddd}</style></head><body>' +
-    '<table style="width:100%;border-bottom:2px solid #c9272e;margin-bottom:8px"><tr><td style="padding-bottom:8px"><img src="' + logoDataUri_('cablotec') + '" style="height:34px"></td>' +
-    '<td style="text-align:right;padding-bottom:8px"><h1>Etiquetas dos componentes – ' + nomeTipo + '</h1>' +
-    '<div class="sub">SERIAL NO: <b style="color:#c9272e">' + e(serial) + '</b>' + (d.grupo ? ' · ' + e(d.grupo) : '') + ' · Emitido em ' + agora_() + '</div></td></tr></table>' +
-    '<table class="res"><tr><th>Componente</th><th>Fabricante</th><th>Modelo</th><th>Nº de série</th></tr>' +
-    ks.map(k => { const r = d.itens[k]; return '<tr><td><b>' + e(r.nome) + '</b></td><td>' + e(r.fabricante || '—') + '</td><td>' + e(r.modelo || '—') + '</td><td class="s">' + e(r.serial || '—') + '</td></tr>'; }).join('') + '</table>';
-  ks.forEach(k => {
-    const r = d.itens[k];
+  const doc = compDocNum_(serial, tipo), rev = ('0' + (Number(d.revisao) || 0)).slice(-2), hoje = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  const leituras = ks.map(k => d.itens[k]);
+  const tecnicos = leituras.map(r => r.por).filter((v, i, a) => v && a.indexOf(v) === i).join(', ') || (user && user.nome) || '';
+  const datas = leituras.map(r => (r.lidoEm || '').slice(0, 10)).filter((v, i, a) => v && a.indexOf(v) === i).join(', ');
+  const css = '@page{size:A4;margin:12mm 12mm 14mm}body{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#1a1a1a}' +
+    'table{border-collapse:collapse}.cart{width:100%;border:1.5px solid #1a1a1a}.cart td{border:1px solid #1a1a1a;padding:4px 6px;vertical-align:middle}' +
+    '.cart .lbl{font-size:6.8pt;color:#555;text-transform:uppercase;letter-spacing:.3px;display:block}.cart .val{font-size:9pt;font-weight:bold}' +
+    'h2{font-size:10.5pt;margin:14px 0 5px;padding-bottom:2px;border-bottom:1.5px solid #c9272e;color:#1a1a1a;text-transform:uppercase;letter-spacing:.4px}' +
+    'h3{font-size:9.5pt;margin:10px 0 3px;color:#c9272e}h4{font-size:8pt;margin:6px 0 2px;color:#444;text-transform:uppercase;letter-spacing:.3px}' +
+    '.g{width:100%}.g th{font-size:7.5pt;text-transform:uppercase;color:#333;text-align:left;border:1px solid #888;padding:3px 5px}' +
+    '.g td{border:1px solid #aaa;padding:3px 5px;vertical-align:top;font-size:8.6pt}.g td.n{width:40%;color:#333}.c{text-align:center}' +
+    '.mono{font-family:Courier New,monospace;font-weight:bold}.ser{color:#c9272e}.comp{page-break-inside:avoid}' +
+    '.fig{border:1px solid #aaa;max-width:230px;max-height:175px}.cap{font-size:7.2pt;color:#555;margin-top:2px}' +
+    '.obs li{margin-bottom:3px}.aprov td{border:1px solid #1a1a1a;padding:5px 6px;height:34px;vertical-align:top;font-size:8pt}';
+  let h = '<html><head><meta charset="utf-8"><style>' + css + '</style></head><body>';
+  // Cartucho
+  h += '<table class="cart"><tr>' +
+    '<td rowspan="2" style="width:150px;text-align:center"><img src="' + logoDataUri_('cablotec') + '" style="height:32px"></td>' +
+    '<td colspan="3" style="text-align:center"><span class="val" style="font-size:12pt">RELATÓRIO TÉCNICO</span><br><span style="font-size:9pt">Identificação dos componentes – ' + nomeTipo + '</span></td></tr>' +
+    '<tr><td><span class="lbl">Documento nº</span><span class="val">' + e(doc) + '</span></td><td><span class="lbl">Revisão</span><span class="val">' + rev + '</span></td>' +
+    '<td><span class="lbl">Data de emissão</span><span class="val">' + hoje + '</span></td></tr>' +
+    '<tr><td><span class="lbl">Nº de série do equipamento</span><span class="val ser">' + e(serial) + '</span></td><td><span class="lbl">Tipo de equipamento</span><span class="val">' + nomeTipo + '</span></td>' +
+    '<td><span class="lbl">Modelo / grupo</span><span class="val">' + e(d.grupo || '—') + '</span></td><td><span class="lbl">Nº de componentes</span><span class="val">' + ks.length + '</span></td></tr></table>';
+  // 1. Identificação
+  h += '<h2>1. Identificação do equipamento</h2><table class="g">' +
+    [['Nº de série do equipamento', '<span class="mono ser">' + e(serial) + '</span>'], ['Tipo de equipamento', nomeTipo], ['Modelo / grupo', e(d.grupo || '—')],
+     ['Data(s) de leitura das etiquetas', e(datas || '—')], ['Técnico(s) responsável(eis)', e(tecnicos || '—')], ['Entidade', 'Cablotec – Cablagens e Sistemas, Lda']]
+      .map(x => '<tr><td class="n">' + x[0] + '</td><td>' + x[1] + '</td></tr>').join('') + '</table>';
+  // 2. Lista de componentes
+  h += '<h2>2. Lista de componentes</h2><table class="g"><tr><th class="c" style="width:28px">Item</th><th>Componente</th><th>Fabricante</th><th>Modelo / referência</th><th>Nº de série</th><th class="c">Ano</th></tr>' +
+    ks.map((k, i) => { const r = d.itens[k]; return '<tr><td class="c">' + (i + 1) + '</td><td><b>' + e(r.nome) + '</b></td><td>' + e(r.fabricante || '—') + '</td><td class="mono" style="font-weight:normal">' + e(r.modelo || r.codigo || '—') +
+      '</td><td class="mono ser">' + e(r.serial || '—') + '</td><td class="c">' + e(r.ano || '—') + '</td></tr>'; }).join('') + '</table>';
+  // 3. Características técnicas
+  h += '<h2>3. Características técnicas dos componentes</h2>';
+  const nomesSec = { id: 'Identificação', ele: 'Dados elétricos', pt: 'Pressão, temperatura e fluidos', out: 'Outros dados' };
+  ks.forEach((k, i) => {
+    const r = d.itens[k], grupos = { id: [], ele: [], pt: [], out: [] };
+    (r.campos || []).forEach(c => grupos[compSecaoCampo_(c[0], c[1])].push(c));
     let img = '';
-    try { if (r.fotoId) { const b = miniatura_(DriveApp.getFileById(r.fotoId), 700); img = '<img class="foto" src="data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes()) + '">'; } } catch (x) {}
-    const chips = [['Fabricante', r.fabricante], ['Modelo', r.modelo], ['Código', r.codigo], ['Nº de série', r.serial], ['Ano', r.ano]].filter(x => x[1]);
-    const resumoNomes = /^(Fabricante|Modelo|Nº de série|Código)/i;
-    const dados = (r.campos || []).filter(c => !(resumoNomes.test(c[0]) && chips.some(x => x[1] === c[1])));
-    h += '<div class="bloco"><h2>' + e(r.nome) + '</h2>' +
-      (chips.length ? '<table class="chips"><tr>' + chips.map(x => '<td><small>' + x[0] + '</small><b' + (x[0] === 'Nº de série' ? ' style="color:#c9272e"' : '') + '>' + e(x[1]) + '</b></td>').join('') + '</tr></table>' : '') +
-      '<table style="width:100%"><tr><td style="vertical-align:top;padding-right:10px">' +
-      (dados.length ? '<table class="d">' + dados.map(c => '<tr><td class="n">' + e(c[0]) + '</td><td>' + e(c[1]) + '</td></tr>').join('') + '</table>' : '') +
-      '<div style="font-size:7.5pt;color:#999;margin-top:4px">Lida em ' + e(r.lidoEm || '') + (r.por ? ' por ' + e(r.por) : '') + (r.fonte === 'OCR' ? ' · leitura de texto' : r.fonte === 'IA' ? ' · leitura por IA' : '') + (r.corrigido ? ' · corrigida à mão' : '') + '</div>' +
-      '</td><td style="width:245px;vertical-align:top;text-align:right">' + img + '</td></tr></table></div>';
+    try { if (r.fotoId) { const b = miniatura_(DriveApp.getFileById(r.fotoId), 700); img = '<img class="fig" src="data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes()) + '"><div class="cap">Fig. ' + (i + 1) + ' – Etiqueta: ' + e(r.nome.toLowerCase()) + '</div>'; } } catch (x) {}
+    h += '<div class="comp"><h3>3.' + (i + 1) + ' ' + e(r.nome) + (r.fabricante ? ' – ' + e(r.fabricante) : '') + '</h3><table style="width:100%"><tr><td style="vertical-align:top;padding-right:10px">' +
+      ['id', 'ele', 'pt', 'out'].filter(g => grupos[g].length).map(g => '<h4>' + nomesSec[g] + '</h4><table class="g">' +
+        grupos[g].map(c => '<tr><td class="n">' + e(c[0]) + '</td><td' + (/s[ée]rie|serial/i.test(c[0]) ? ' class="mono ser"' : '') + '>' + e(c[1]) + '</td></tr>').join('') + '</table>').join('') +
+      '<div class="cap" style="margin-top:4px">Leitura: ' + e(r.lidoEm || '—') + (r.por ? ' · ' + e(r.por) : '') + ' · ' + (r.fonte === 'IA' ? 'reconhecimento por IA' : 'reconhecimento de texto') + (r.corrigido ? ' · revista manualmente' : '') + '</div>' +
+      '</td><td style="width:235px;vertical-align:top;text-align:center">' + img + '</td></tr></table></div>';
   });
-  h += '<p style="margin-top:14px;font-size:8pt;color:#888;border-top:1px solid #ddd;padding-top:6px">Cablotec – Cablagens e Sistemas, Lda · Documento gerado pela Aplicação Cablotec</p></body></html>';
+  // 4. Observações técnicas
+  const obs = [];
+  const ctl = d.itens.controlador;
+  if (ctl) { const v = ((ctl.campos || []).filter(c => /vers|firmware/i.test(c[0]))[0] || [])[1] || '';
+    if (v && v.replace(/\s/g, '').toUpperCase() !== 'PV06/SW3.61') obs.push('Versão do firmware do controlador (' + e(v) + ') diferente da versão de referência PV06/SW3.61 – informar o cliente.'); }
+  leituras.forEach(r => { if (r.fonte === 'OCR' && !r.corrigido) obs.push(e(r.nome) + ': dados obtidos por reconhecimento de texto – confirmar com a fotografia da etiqueta (figura anexa).'); });
+  leituras.forEach(r => { if (!r.serial) obs.push(e(r.nome) + ': nº de série não identificado na etiqueta.'); });
+  h += '<h2>4. Observações técnicas</h2>' + (obs.length ? '<ul class="obs">' + obs.map(o => '<li>' + o + '</li>').join('') + '</ul>' : '<p>Sem observações.</p>');
+  // 5. Aprovação
+  h += '<h2>5. Aprovação</h2><table class="aprov" style="width:100%"><tr><td style="width:33%"><b>Elaborado por</b><br>' + e(tecnicos) + '<br><span style="color:#777">Data: ' + hoje + '</span></td>' +
+    '<td style="width:33%"><b>Verificado por</b><br><br><span style="color:#777">Data: ____/____/______</span></td><td><b>Aprovado por</b><br><br><span style="color:#777">Data: ____/____/______</span></td></tr></table>';
+  h += '<p style="margin-top:10px;font-size:7.2pt;color:#666;border-top:1px solid #999;padding-top:4px">' + e(doc) + ' · Rev. ' + rev + ' · Cablotec – Cablagens e Sistemas, Lda · Documento gerado pela Aplicação Cablotec a partir das etiquetas dos componentes.</p></body></html>';
   return HtmlService.createHtmlOutput(h).getAs(MimeType.PDF);
 }
