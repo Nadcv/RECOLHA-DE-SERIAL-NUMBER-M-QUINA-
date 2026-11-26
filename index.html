@@ -380,7 +380,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.5.2';
+var VERSAO = '1.5.3';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -571,7 +571,7 @@ function desenharComponentes() {
     if (lendo) corpo = '<p class="estado-c">⏳ A ler a etiqueta…</p>';
     else if (r) corpo = (r.fotoUrl ? '<img class="mini" src="' + r.fotoUrl + '">' : '') +
       '<p class="estado-c"><span class="ok">✔ Lida</span>' + (r.modelo ? ' · ' + esc(r.modelo) : '') + (r.serial ? ' · <b>S/N ' + esc(r.serial) + '</b>' : '') +
-      (r.fonte === 'OCR' ? ' <small>(leitura simples – confirme)</small>' : '') + '</p>' +
+      '</p>' +
       '<details><summary style="cursor:pointer;font-size:13px;color:#555">Ver os ' + (r.campos || []).length + ' campos lidos</summary><table>' +
       (r.campos || []).map(function (c) { return '<tr><th>' + esc(c[0]) + '</th><td>' + esc(c[1]) + '</td></tr>'; }).join('') + '</table>' +
       '<div class="acoes-c"><button class="botao sec" onclick="corrigirComponente(\'' + d.k + '\')">✏️ Corrigir</button><button class="botao sec" onclick="apagarComponente(\'' + d.k + '\')">🗑 Apagar</button></div></details>' +

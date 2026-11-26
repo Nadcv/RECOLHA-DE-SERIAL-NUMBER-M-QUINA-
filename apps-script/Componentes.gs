@@ -430,7 +430,7 @@ function compHtml_(serial, tipo, d, ks, user, semFotos) {
     h += '<div class="comp"><h3>3.' + (i + 1) + ' ' + e(r.nome) + (r.fabricante ? ' – ' + e(r.fabricante) : '') + '</h3><table style="width:100%"><tr><td style="vertical-align:top;padding-right:10px">' +
       ['id', 'ele', 'pt', 'out'].filter(g => grupos[g].length).map(g => '<h4>' + nomesSec[g] + '</h4><table class="g">' +
         grupos[g].map(c => '<tr><td class="n">' + e(c[0]) + '</td><td' + (/s[ée]rie|serial/i.test(c[0]) ? ' class="mono ser"' : '') + '>' + e(c[1]) + '</td></tr>').join('') + '</table>').join('') +
-      '<div class="cap" style="margin-top:4px">Leitura: ' + e(r.lidoEm || '—') + (r.por ? ' · ' + e(r.por) : '') + ' · ' + (r.fonte === 'IA' ? 'reconhecimento por IA' : 'reconhecimento de texto') + (r.corrigido ? ' · revista manualmente' : '') + '</div>' +
+      '<div class="cap" style="margin-top:4px">Leitura: ' + e(r.lidoEm || '—') + (r.por ? ' · ' + e(r.por) : '') + '</div>' +
       '</td><td style="width:235px;vertical-align:top;text-align:center">' + img + '</td></tr></table></div>';
   });
   // 4. Observações técnicas
@@ -438,7 +438,6 @@ function compHtml_(serial, tipo, d, ks, user, semFotos) {
   const ctl = d.itens.controlador;
   if (ctl) { const v = ((ctl.campos || []).filter(c => /vers|firmware/i.test(c[0]))[0] || [])[1] || '';
     if (v && v.replace(/\s/g, '').toUpperCase() !== 'PV06/SW3.61') obs.push('Versão do firmware do controlador (' + e(v) + ') diferente da versão de referência PV06/SW3.61 – informar o cliente.'); }
-  leituras.forEach(r => { if (r.fonte === 'OCR' && !r.corrigido) obs.push(e(r.nome) + ': dados obtidos por reconhecimento de texto – confirmar com a fotografia da etiqueta (figura anexa).'); });
   leituras.forEach(r => { if (!r.serial) obs.push(e(r.nome) + ': nº de série não identificado na etiqueta.'); });
   h += '<h2>4. Observações técnicas</h2>' + (obs.length ? '<ul class="obs">' + obs.map(o => '<li>' + o + '</li>').join('') + '</ul>' : '<p>Sem observações.</p>');
   // 5. Aprovação
