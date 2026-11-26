@@ -1,7 +1,7 @@
 /* ===================== ETIQUETAS DOS COMPONENTES (Grupo / Clico) =====================
- * Uma foto por componente (depósito, compressor, unidade, ventilador, controlador…).
- * A foto fica na pasta do serial como "comp_<tipo>_<componente>_<data>.jpg" e os dados
- * lidos ficam em "componentes.json" na mesma pasta. Aparecem na ficha e no PDF (folha própria).
+ * Totalmente à parte do registo do serial: não mexe nas pastas, fichas, PDF nem e-mails dos seriais.
+ * Pasta própria no Drive "Etiquetas dos componentes" (ao lado da pasta dos seriais), com uma
+ * subpasta por máquina "<SERIAL> - Grupo|Clico": fotos + componentes.json. Envio por e-mail próprio (PDF).
  */
 const COMPONENTES_ = {
   grupo: [
@@ -42,61 +42,76 @@ function compDefsPublicas_() {
   Object.keys(COMPONENTES_).forEach(t => { r[t] = COMPONENTES_[t].map(c => ({ k: c.k, nome: c.nome, icone: c.icone, dica: c.dica })); });
   return r;
 }
-
-/** componentes.json da pasta: { grupo: { compressor: {...} }, clico: {...} } */
-function lerComponentes_(pasta) {
-  const it = pasta.getFilesByName('componentes.json');
-  if (!it.hasNext()) return {};
-  try { return JSON.parse(it.next().getBlob().getDataAsString()) || {}; } catch (e) { return {}; }
+function compTipo_(t) { return t === 'clico' ? 'clico' : 'grupo'; }
+function compSerial_(s) {
+  s = String(s || '').trim().toUpperCase();
+  if (!/^[A-Z0-9./]{2,30}$/.test(s)) throw new Error('Serial inválido.');
+  return s;
 }
-function guardarComponentes_(pasta, dados) {
-  const txt = JSON.stringify(dados);
+
+/** Pasta "Etiquetas dos componentes" – fora da pasta dos seriais, para não aparecer nas listas nem nos relatórios. */
+function compRaiz_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('COMP_PASTA_ID');
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  const base = DriveApp.getFolderById(CONFIG.PASTA_ID), pais = base.getParents();
+  const pai = pais.hasNext() ? pais.next() : DriveApp.getRootFolder();
+  const it = pai.getFoldersByName('Etiquetas dos componentes');
+  const f = it.hasNext() ? it.next() : pai.createFolder('Etiquetas dos componentes');
+  props.setProperty('COMP_PASTA_ID', f.getId());
+  return f;
+}
+function compPasta_(serial, tipo, criar) {
+  const nome = serial + ' - ' + (tipo === 'clico' ? 'Clico' : 'Grupo');
+  const raiz = compRaiz_(), it = raiz.getFoldersByName(nome);
+  if (it.hasNext()) return it.next();
+  return criar ? raiz.createFolder(nome) : null;
+}
+function compLer_(pasta) {
+  if (!pasta) return null;
   const it = pasta.getFilesByName('componentes.json');
+  if (!it.hasNext()) return null;
+  try { return JSON.parse(it.next().getBlob().getDataAsString()); } catch (e) { return null; }
+}
+function compGuardar_(pasta, dados) {
+  const txt = JSON.stringify(dados), it = pasta.getFilesByName('componentes.json');
   if (it.hasNext()) it.next().setContent(txt);
   else pasta.createFile(Utilities.newBlob(txt, 'application/json', 'componentes.json'));
-}
-function temComponentes_(c) {
-  return Object.keys(c || {}).some(t => Object.keys(c[t] || {}).length);
 }
 
 /** POST lerComponente: guarda a foto do componente e lê a etiqueta. */
 function apiLerComponente_(pin, req) {
   const user = verificarPin_(pin);
-  const tipo = req.tipo === 'clico' ? 'clico' : 'grupo';
+  const tipo = compTipo_(req.tipo), serial = compSerial_(req.serial);
   const def = compDef_(tipo, String(req.comp || ''));
   if (!def) throw new Error('Componente inválido.');
   if (!req.base64) throw new Error('Foto em falta.');
-  const pastaId = formCriarPasta(pin, req.serial, req.grupo);
-  const pasta = DriveApp.getFolderById(pastaId);
-
-  // substitui a foto anterior deste componente
-  const prefixo = 'comp_' + tipo + '_' + def.k + '_';
+  const pasta = compPasta_(serial, tipo, true);
+  const prefixo = def.k + '_';
   const files = pasta.getFiles();
   while (files.hasNext()) { const f = files.next(); if (f.getName().indexOf(prefixo) === 0) f.setTrashed(true); }
   const ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
   const foto = pasta.createFile(Utilities.newBlob(Utilities.base64Decode(req.base64), 'image/jpeg', prefixo + ts + '.jpg'));
-
   let r;
   try { r = lerComponenteIA_(def, foto); }
   catch (e) {
     Logger.log('Leitura do componente falhou: ' + e.message);
     const texto = lerTextoOCR_([foto]);
-    r = { campos: texto.split(/\n+/).map(l => l.trim()).filter(l => l.length > 2).slice(0, 25).map((l, i) => ['Linha ' + (i + 1), l]),
-          fonte: 'OCR' };
+    r = { campos: texto.split(/\n+/).map(l => l.trim()).filter(l => l.length > 2).slice(0, 25).map((l, i) => ['Linha ' + (i + 1), l]), fonte: 'OCR' };
   }
   const reg = { nome: def.nome, fabricante: r.fabricante || '', modelo: r.modelo || '', codigo: r.codigo || '', serial: r.serial || '',
                 ano: r.ano || '', campos: (r.campos || []).slice(0, 40), fonte: r.fonte || '', fotoId: foto.getId(),
                 lidoEm: agora_(), por: (user && user.nome) || '' };
-  const todos = lerComponentes_(pasta);
-  todos[tipo] = todos[tipo] || {};
-  todos[tipo][def.k] = reg;
-  guardarComponentes_(pasta, todos);
-  return { pastaId, tipo, comp: def.k, registo: reg };
+  const d = compLer_(pasta) || { serial, tipo, itens: {} };
+  d.grupo = String(req.grupo || d.grupo || '').trim().toUpperCase().slice(0, 30);
+  d.itens = d.itens || {}; d.itens[def.k] = reg; d.atualizadoEm = agora_();
+  compGuardar_(pasta, d);
+  return { tipo, comp: def.k, registo: reg };
 }
 
 function lerComponenteIA_(def, foto) {
   if (!geminiDisponivel_()) throw new Error('IA indisponível');
-  const pedido = 'Esta foto é a etiqueta de um componente de um grupo de frio: ' + def.nome + '.\n' + def.ia + '\n' +
+  const pedido = 'Esta foto é a etiqueta de um componente de um equipamento de frio: ' + def.nome + '.\n' + def.ia + '\n' +
     'Transcreve TODOS os campos e valores visíveis, exatamente como aparecem, sem inventar nada. ' +
     'Ignora avisos de segurança, moradas e texto em chinês. Se um valor não estiver visível, não o incluas.\n' +
     'Responde só com JSON neste formato:\n' +
@@ -131,96 +146,121 @@ function lerComponenteIA_(def, foto) {
   return out;
 }
 
-/** POST componentes: o que já foi lido para um serial (para continuar mais tarde). */
+/** Uma vez só: leva as leituras feitas na 1.ª versão (dentro da pasta do serial) para a pasta própria. */
+function migrarComponentesAntigos_() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('COMP_MIGRADO') === '1') return;
+  const raiz = DriveApp.getFolderById(CONFIG.PASTA_ID), pastas = [];
+  const it = raiz.getFolders();
+  while (it.hasNext()) {
+    const f = it.next();
+    if (f.getName() === 'Enviados') { const e = f.getFolders(); while (e.hasNext()) pastas.push(e.next()); }
+    else pastas.push(f);
+  }
+  pastas.forEach(p => {
+    const js = p.getFilesByName('componentes.json');
+    const antigo = js.hasNext() ? js.next() : null;
+    let dados = {};
+    if (antigo) { try { dados = JSON.parse(antigo.getBlob().getDataAsString()) || {}; } catch (e) {} }
+    const fotos = [], fs = p.getFiles();
+    while (fs.hasNext()) { const f = fs.next(); if (/^comp_(grupo|clico)_/i.test(f.getName())) fotos.push(f); }
+    if (!antigo && !fotos.length) return;
+    const serial = p.getName().split(/\s*[-–_]\s*/)[0].trim().toUpperCase();
+    ['grupo', 'clico'].forEach(t => {
+      const itens = dados[t] || {}, fotosT = fotos.filter(f => f.getName().toLowerCase().indexOf('comp_' + t + '_') === 0);
+      if (!Object.keys(itens).length && !fotosT.length) return;
+      const dest = compPasta_(serial, t, true);
+      fotosT.forEach(f => { f.moveTo(dest); f.setName(f.getName().replace(/^comp_(grupo|clico)_/i, '')); });
+      const d = compLer_(dest) || { serial, tipo: t, itens: {} };
+      Object.keys(itens).forEach(k => { if (!d.itens[k]) d.itens[k] = itens[k]; });
+      compGuardar_(dest, d);
+    });
+    if (antigo) antigo.setTrashed(true);
+  });
+  props.setProperty('COMP_MIGRADO', '1');
+}
+
+/** POST componentes: definições + o que já foi lido para um serial (Grupo e Clico). */
 function apiComponentes_(serial) {
-  serial = String(serial || '').trim().toUpperCase();
-  const r = { defs: compDefsPublicas_(), pastaId: '', componentes: {} };
-  if (!serial) return r;
-  const raiz = DriveApp.getFolderById(CONFIG.PASTA_ID);
-  const prefixo = new RegExp('^' + serial.replace(/[.\/]/g, '\\$&') + '(\\s*[-–_]|$)');
-  const procurar = (pasta) => {
-    const it = pasta.getFolders();
-    while (it.hasNext()) { const f = it.next(); if (prefixo.test(f.getName())) return f; }
-    return null;
-  };
-  let p = procurar(raiz);
-  if (!p) { const env = raiz.getFoldersByName('Enviados'); if (env.hasNext()) p = procurar(env.next()); }
-  if (p) { r.pastaId = p.getId(); r.componentes = lerComponentes_(p); }
+  try { migrarComponentesAntigos_(); } catch (e) { Logger.log('Migração componentes: ' + e.message); }
+  const r = { defs: compDefsPublicas_(), componentes: {}, info: {} };
+  let s = '';
+  try { s = compSerial_(serial); } catch (e) { return r; }
+  ['grupo', 'clico'].forEach(t => {
+    const d = compLer_(compPasta_(s, t, false));
+    if (d) { r.componentes[t] = d.itens || {}; r.info[t] = { grupo: d.grupo || '', enviadoEm: d.enviadoEm || '', enviadoPara: d.enviadoPara || '' }; }
+  });
   return r;
 }
 
-/** POST componenteCorrigir: corrigir à mão os campos de um componente. */
+/** POST componenteCorrigir: corrigir à mão (ou apagar) a leitura de um componente. */
 function apiComponenteCorrigir_(pin, req) {
   verificarPin_(pin);
-  const pasta = DriveApp.getFolderById(req.pastaId);
-  if (!pastaPertenceAoRelatorio_(pasta)) throw new Error('Pasta inválida.');
-  const tipo = req.tipo === 'clico' ? 'clico' : 'grupo';
-  const todos = lerComponentes_(pasta);
-  const reg = (todos[tipo] || {})[req.comp];
+  const tipo = compTipo_(req.tipo), pasta = compPasta_(compSerial_(req.serial), tipo, false);
+  const d = compLer_(pasta);
+  const reg = d && d.itens && d.itens[req.comp];
   if (!reg) throw new Error('Componente sem leitura.');
-  if (req.apagar) { delete todos[tipo][req.comp]; guardarComponentes_(pasta, todos); return { ok: true }; }
+  if (req.apagar) { delete d.itens[req.comp]; compGuardar_(pasta, d); return { ok: true }; }
   reg.campos = (req.campos || []).map(c => [String(c[0] || '').trim().slice(0, 60), String(c[1] || '').trim().slice(0, 200)]).filter(c => c[0] && c[1]).slice(0, 40);
-  ['modelo', 'serial'].forEach(k => { if (req[k] !== undefined) reg[k] = String(req[k]).trim().slice(0, 80); });
+  if (req.modelo !== undefined) reg.modelo = String(req.modelo).trim().slice(0, 80);
+  if (req.serialComp !== undefined) reg.serial = String(req.serialComp).trim().slice(0, 80);
   reg.corrigido = true;
-  guardarComponentes_(pasta, todos);
+  compGuardar_(pasta, d);
   return { registo: reg };
 }
 
-/** HTML da ficha: um cartão por componente. */
-function componentesHtmlFicha_(pasta) {
-  const todos = lerComponentes_(pasta);
-  if (!temComponentes_(todos)) return '';
-  let h = '';
-  ['grupo', 'clico'].forEach(tipo => {
-    const c = todos[tipo] || {};
-    const ks = (COMPONENTES_[tipo] || []).map(d => d.k).filter(k => c[k]).concat(Object.keys(c).filter(k => !compDef_(tipo, k)));
-    if (!ks.length) return;
-    h += `<div class="card"><div class="rotulo">${tipo === 'clico' ? 'ETIQUETAS DO CLICO' : 'ETIQUETAS DO GRUPO'}</div>`;
-    ks.forEach(k => {
-      const r = c[k], d = compDef_(tipo, k) || {};
-      let img = '';
-      try { if (r.fotoId) { const b = miniatura_(DriveApp.getFileById(r.fotoId), 900); img = `<img src="data:${b.getContentType()};base64,${Utilities.base64Encode(b.getBytes())}" onclick="this.classList.toggle('zoom')">`; } } catch (e) {}
-      h += `<details style="border-top:1px solid #eee;padding:8px 0"><summary style="font-weight:700;cursor:pointer">${esc_(d.icone || '🔩')} ${esc_(r.nome || k)}` +
-           `${r.modelo ? ` · <span style="font-weight:400">${esc_(r.modelo)}</span>` : ''}${r.serial ? ` · <span style="font-weight:400;color:#c9272e">S/N ${esc_(r.serial)}</span>` : ''}</summary>` +
-           `<table>${(r.campos || []).map(x => `<tr><th>${esc_(x[0])}</th><td>${esc_(x[1])}</td></tr>`).join('')}</table>${img}</details>`;
-    });
-    h += '</div>';
-  });
-  return h;
+/** POST enviarComponentes: e-mail próprio com o PDF das etiquetas dos componentes de uma máquina. */
+function apiEnviarComponentes_(pin, req) {
+  const user = verificarPin_(pin);
+  const tipo = compTipo_(req.tipo), serial = compSerial_(req.serial), pasta = compPasta_(serial, tipo, false);
+  const d = compLer_(pasta);
+  const ks = d ? (COMPONENTES_[tipo] || []).map(c => c.k).filter(k => d.itens && d.itens[k]) : [];
+  if (!ks.length) throw new Error('Ainda não há etiquetas lidas para este serial.');
+  const emails = validarEmails_(req.emails);
+  const para = emails || CONFIG.EMAIL_DESTINO;
+  const nomeTipo = tipo === 'clico' ? 'Clico' : 'Grupo';
+  const pdf = compPdf_(serial, tipo, d, ks).setName('Etiquetas_componentes_' + nomeTipo + '_' + serial.replace(/[^A-Z0-9]+/g, '_') + '.pdf');
+  const e = esc_, vermelho = '#c9272e', cinza = '#3a393a';
+  const linhas = ks.map(k => { const r = d.itens[k]; return `<tr><td style="padding:8px 10px;border-bottom:1px solid #e3e6ee;font-size:13px;font-weight:bold">${e(r.nome)}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e3e6ee;font-size:13px">${e(r.modelo || '—')}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e3e6ee;font-size:13px;font-family:Consolas,monospace;color:${vermelho};font-weight:bold">${e(r.serial || '—')}</td></tr>`; }).join('');
+  const th = `padding:9px 10px;font-size:12px;color:#fff;text-align:left;background:${cinza}`;
+  const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#eef1f6"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:24px 0"><tr><td align="center">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#fff;border-radius:8px;overflow:hidden;font-family:Arial,Helvetica,sans-serif">
+<tr><td style="padding:18px 28px 14px;border-bottom:4px solid ${vermelho}"><img src="cid:logoCablotec" alt="Cablotec" height="44" style="display:block;height:44px;border:0"></td></tr>
+<tr><td style="background:${cinza};padding:18px 28px"><div style="font-size:20px;font-weight:bold;color:#fff">Etiquetas dos componentes – ${nomeTipo}</div><div style="font-size:13px;color:#d6d6d6;margin-top:4px">Serial ${e(serial)}${d.grupo ? ' · ' + e(d.grupo) : ''}</div></td></tr>
+<tr><td style="padding:26px 28px 6px"><p style="margin:0 0 14px;font-size:14px;color:#222">Exmos. Senhores,</p>
+<p style="margin:0 0 18px;font-size:14px;color:#222;line-height:1.55">Vimos por este meio remeter o registo das etiquetas dos componentes do ${nomeTipo.toLowerCase()} abaixo identificado, com o modelo e o número de série de cada componente. Segue em anexo o documento em formato PDF com todos os dados lidos e as fotografias das etiquetas.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e3e6ee"><tr><th style="${th}">Componente</th><th style="${th}">Modelo</th><th style="${th}">Nº de série</th></tr>${linhas}</table></td></tr>
+<tr><td style="padding:20px 28px 4px"><p style="margin:0 0 22px;font-size:14px;color:#222">Ficamos ao dispor para qualquer esclarecimento adicional.</p><p style="margin:0 0 4px;font-size:14px;color:#222">Com os melhores cumprimentos,</p></td></tr>
+<tr><td style="padding:10px 28px 26px"><div style="border-left:4px solid ${vermelho};padding:4px 0 4px 12px"><div style="font-size:15px;font-weight:bold;color:${vermelho}">Aplicação Cablotec</div><div style="font-size:13px;color:#555">Etiquetas dos componentes${user && user.nome ? ' · ' + e(user.nome) : ''}</div><div style="font-size:12px;color:#888;margin-top:2px">Cablotec – Cablagens e Sistemas, Lda</div></div></td></tr>
+<tr><td style="background:#f4f6fa;padding:14px 28px;border-top:1px solid #e3e6ee"><p style="margin:0;font-size:11px;color:#888;line-height:1.5">Esta mensagem foi gerada automaticamente pela Aplicação Cablotec. O documento anexo contém informação técnica destinada exclusivamente aos destinatários indicados.</p></td></tr>
+</table></td></tr></table></body></html>`;
+  MailApp.sendEmail({ to: para, subject: 'Cablotec – Etiquetas dos componentes – ' + nomeTipo + ' – Serial ' + serial,
+    body: 'Etiquetas dos componentes do ' + nomeTipo + ' (serial ' + serial + ') em anexo (PDF).',
+    htmlBody: html, inlineImages: { logoCablotec: logoBlob_('cablotec') }, name: 'Cablotec – Etiquetas dos componentes', attachments: [pdf] });
+  d.enviadoEm = agora_(); d.enviadoPara = para;
+  compGuardar_(pasta, d);
+  return { enviadoPara: para, enviadoEm: d.enviadoEm };
 }
 
-/** PDF: folha "ETIQUETAS DOS COMPONENTES" com uma tabela por componente. */
-function montarFolhaComponentes_(body, item) {
-  if (!item.pasta) return;
-  const todos = lerComponentes_(item.pasta);
-  if (!temComponentes_(todos)) return;
-  const quebra = body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0);
-  quebra.appendPageBreak();
-  quebra.editAsText().setFontSize(1);
-  cabecalhoLogos_(body);
-  const titulo = body.appendParagraph(T_('ETIQUETAS DOS COMPONENTES', 'COMPONENT LABELS'));
-  titulo.editAsText().setBold(true).setFontSize(15).setForegroundColor('#000000');
-  const sub = body.appendParagraph('SERIAL NO: ' + item.serial + (item.grupo ? '  ·  ' + item.grupo : ''));
-  sub.editAsText().setBold(false).setFontSize(9).setForegroundColor('#555555');
-  sub.setSpacingAfter(6);
-  ['grupo', 'clico'].forEach(tipo => {
-    const c = todos[tipo] || {};
-    const ks = (COMPONENTES_[tipo] || []).map(d => d.k).filter(k => c[k]).concat(Object.keys(c).filter(k => !compDef_(tipo, k)));
-    ks.forEach(k => {
-      const r = c[k];
-      const h = body.appendParagraph((r.nome || k) + (r.fabricante ? ' – ' + r.fabricante : ''));
-      h.editAsText().setBold(true).setFontSize(10).setForegroundColor('#c9272e');
-      h.setSpacingBefore(8).setSpacingAfter(2);
-      const linhas = (r.campos || []).slice(0, 18).map(x => [String(x[0]), String(x[1])]);
-      if (!linhas.length) linhas.push(['—', T_('Sem dados lidos', 'No data read')]);
-      const t = body.appendTable(linhas);
-      t.setBorderColor('#dddddd').setBorderWidth(0.5);
-      for (let i = 0; i < t.getNumRows(); i++) {
-        const row = t.getRow(i);
-        row.getCell(0).setWidth(170).editAsText().setFontSize(8).setBold(true).setForegroundColor('#333333');
-        row.getCell(1).editAsText().setFontSize(8).setBold(false).setForegroundColor('#111111');
-        for (let j = 0; j < 2; j++) row.getCell(j).setPaddingTop(1).setPaddingBottom(1);
-      }
-    });
+/** PDF (HTML → PDF) com uma tabela e a foto de cada componente. */
+function compPdf_(serial, tipo, d, ks) {
+  const e = esc_;
+  let h = '<html><head><meta charset="utf-8"><style>@page{size:A4;margin:14mm 12mm}body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#222}' +
+    'h1{font-size:15pt;margin:0;color:#3a393a}.sub{font-size:9pt;color:#666}h2{font-size:11pt;margin:14px 0 4px;color:#c9272e}' +
+    'table.d{width:100%;border-collapse:collapse}table.d td{border-bottom:1px solid #ddd;padding:3px 4px;vertical-align:top}table.d td.n{width:38%;font-weight:bold;color:#333}' +
+    '.bloco{page-break-inside:avoid;margin-bottom:6px}.foto{max-width:260px;max-height:200px;border:1px solid #ddd;margin-top:4px}</style></head><body>' +
+    '<table style="width:100%;border-bottom:2px solid #c9272e;margin-bottom:10px"><tr><td style="padding-bottom:8px"><img src="' + logoDataUri_('cablotec') + '" style="height:34px"></td>' +
+    '<td style="text-align:right;padding-bottom:8px"><h1>Etiquetas dos componentes – ' + (tipo === 'clico' ? 'Clico' : 'Grupo') + '</h1>' +
+    '<div class="sub">SERIAL NO: <b style="color:#c9272e">' + e(serial) + '</b>' + (d.grupo ? ' · ' + e(d.grupo) : '') + ' · ' + agora_() + '</div></td></tr></table>';
+  ks.forEach(k => {
+    const r = d.itens[k];
+    let img = '';
+    try { if (r.fotoId) { const b = miniatura_(DriveApp.getFileById(r.fotoId), 700); img = '<img class="foto" src="data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes()) + '">'; } } catch (x) {}
+    h += '<div class="bloco"><h2>' + e(r.nome) + (r.fabricante ? ' – ' + e(r.fabricante) : '') + '</h2><table class="d">' +
+      (r.campos || []).map(c => '<tr><td class="n">' + e(c[0]) + '</td><td>' + e(c[1]) + '</td></tr>').join('') + '</table>' + img + '</div>';
   });
+  h += '<p style="margin-top:14px;font-size:8pt;color:#888;border-top:1px solid #ddd;padding-top:6px">Cablotec – Cablagens e Sistemas, Lda · Documento gerado pela Aplicação Cablotec</p></body></html>';
+  return HtmlService.createHtmlOutput(h).getAs(MimeType.PDF);
 }

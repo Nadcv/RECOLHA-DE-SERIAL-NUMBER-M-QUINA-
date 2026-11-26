@@ -218,7 +218,6 @@ function lerSubpastas_(pasta) {
     while (files.hasNext()) {
       const f = files.next();
       if (f.getMimeType().indexOf('image/') !== 0) continue;
-      if (/^comp_/i.test(f.getName())) continue;   // fotos das etiquetas dos componentes (folha própria)
       if (/^assinatura/i.test(f.getName())) assinatura = f;
       else if (/^foto3[_.\s-]/i.test(f.getName())) foto3 = f;
       else fotos.push(f);
@@ -286,9 +285,6 @@ function montarPagina_(body, item) {
     quebra.editAsText().setFontSize(1);
     montarFolhaDados_(body, item);
   }
-
-  // 7) Folha com as etiquetas dos componentes (depósito, compressor, ventilador…), se houver
-  try { montarFolhaComponentes_(body, item); } catch (e) { Logger.log('Componentes no PDF: ' + e.message); }
 }
 
 const CAMPOS_ETIQUETA_ = [
@@ -961,7 +957,6 @@ function doGet(e) {
   while (files.hasNext()) {
     const f = files.next();
     if (/^assinatura/i.test(f.getName())) assinaturaF = f;
-    else if (/^comp_/i.test(f.getName())) continue;
     else if (f.getMimeType().indexOf('image/') === 0) fotos.push(f);
     else if (/^Ficha_.*\.pdf$/.test(f.getName())) fichaUrl = f.getUrl();
   }
@@ -988,7 +983,6 @@ function doGet(e) {
        <img src="data:image/png;base64,${Utilities.base64Encode(assinaturaF.getBlob().getBytes())}" style="background:#fff;border:1px solid #eee">
        <p style="margin:6px 0 0;font-size:14px">${esc_(((info.extras || {}).assinadoPor) || '')}</p></div>` : ''}
     ${linhas ? `<div class="card"><div class="rotulo">DADOS DA ETIQUETA</div><table>${linhas}</table></div>` : ''}
-    ${componentesHtmlFicha_(pasta)}
     <div class="card">
       <div class="rotulo">FOTOS (${fotos.length}) <small>· toque para ampliar</small></div>
       ${imgs || '<p>Sem fotos.</p>'}
@@ -1210,9 +1204,11 @@ function doPost(e) {
       case 'etiquetasQR':     verificarPin_(pin); data = apiEtiquetasQR_(req.ids); break;
       case 'remover':         verificarPin_(pin); data = apiRemover_(req.pastaId); break;
       case 'consultar':       verificarPin_(pin); data = apiConsultar_(req.serial || req.codigo); break;
-      case 'componentes':     verificarPin_(pin); data = apiComponentes_(req.serial); break;
-      case 'lerComponente':   data = apiLerComponente_(pin, req); break;
+      // Etiquetas dos componentes (Grupo / Clico) – à parte do registo do serial (ver Componentes.gs)
+      case 'componentes':        verificarPin_(pin); data = apiComponentes_(req.serial); break;
+      case 'lerComponente':      data = apiLerComponente_(pin, req); break;
       case 'componenteCorrigir': data = apiComponenteCorrigir_(pin, req); break;
+      case 'enviarComponentes':  data = apiEnviarComponentes_(pin, req); break;
       default: throw new Error('Ação desconhecida.');
     }
     resposta = { ok: true, data };

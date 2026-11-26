@@ -231,7 +231,7 @@
     </div>
     <label class="sep">INFORMAÇÃO DO GRUPO <small>(opcional)</small></label>
     <input id="cGrupo" class="maius" autocapitalize="characters" autocomplete="off" placeholder="ex: 46 VM" list="grupos">
-    <p class="dica" id="cInfo">Uma foto por etiqueta: a app lê os dados sozinha e junta-os à ficha e ao PDF deste serial.</p>
+    <p class="dica" id="cInfo">Uma foto por etiqueta: a app lê os dados sozinha. Fica à parte do registo do serial e envia-se por e-mail próprio.</p>
   </div>
   <div id="cLista"></div>
 </section>
@@ -380,7 +380,7 @@
 </nav>
 
 <script>
-var VERSAO = '1.5.0';
+var VERSAO = '1.5.1';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -537,7 +537,7 @@ function desenharFotos() {
 function remover(s) { fotos[s] = null; desenharFotos(); }
 
 /* ---------------- Etiquetas dos componentes (Grupo / Clico) ---------------- */
-var compTipo = 'grupo', compDefs = null, compDados = {}, compPastaId = '', compLendo = {};
+var compTipo = 'grupo', compDefs = null, compDados = {}, compInfo = {}, compLendo = {};
 function abrirComponentes(tipo) {
   compTipo = tipo;
   if (!el('cSerial').value && el('serial').value) el('cSerial').value = el('serial').value.trim().toUpperCase();
@@ -545,26 +545,26 @@ function abrirComponentes(tipo) {
   if (!compDefs) {
     el('cLista').innerHTML = '<div class="card"><p class="dica">A carregar…</p></div>';
     api('componentes', { serial: el('cSerial').value.trim() }).then(function (r) {
-      compDefs = r.defs; compDados = r.componentes || {}; compPastaId = r.pastaId || ''; desenharComponentes();
+      compDefs = r.defs; compDados = r.componentes || {}; compInfo = r.info || {}; desenharComponentes();
     }).catch(function (e) { el('cLista').innerHTML = '<div class="card"><p class="erro">❌ ' + esc(e.message) + '</p></div>'; });
   } else desenharComponentes();
 }
 function carregarComponentes() {
   var s = el('cSerial').value.trim().toUpperCase(); el('cSerial').value = s;
-  compDados = {}; compPastaId = ''; if (!compDefs) return abrirComponentes(compTipo);
+  compDados = {}; compInfo = {}; if (!compDefs) return abrirComponentes(compTipo);
   desenharComponentes();
   if (!s) return;
-  api('componentes', { serial: s }).then(function (r) { compDados = r.componentes || {}; compPastaId = r.pastaId || ''; desenharComponentes(); }).catch(function () {});
+  api('componentes', { serial: s }).then(function (r) { compDados = r.componentes || {}; compInfo = r.info || {}; if (!el('cGrupo').value) { var g = (compInfo.grupo || compInfo.clico || {}).grupo; if (g) el('cGrupo').value = g; } desenharComponentes(); }).catch(function () {});
 }
 function desenharComponentes() {
   var defs = (compDefs || {})[compTipo] || [], lidos = compDados[compTipo] || {};
   if (!defs.length) {
-    el('cInfo').textContent = 'Uma foto por etiqueta: a app lê os dados sozinha e junta-os à ficha e ao PDF deste serial.';
+    el('cInfo').textContent = 'Uma foto por etiqueta: a app lê os dados sozinha. Fica à parte do registo do serial e envia-se por e-mail próprio.';
     el('cLista').innerHTML = '<div class="card"><p class="dica">' + (compTipo === 'clico' ? 'As etiquetas dos Clicos ainda estão a ser preparadas.' : 'Sem componentes definidos.') + '</p></div>';
     return;
   }
   var n = defs.filter(function (d) { return lidos[d.k]; }).length;
-  el('cInfo').innerHTML = '<b>' + n + ' de ' + defs.length + '</b> etiquetas lidas. Uma foto por etiqueta: a app lê os dados sozinha e junta-os à ficha e ao PDF deste serial.';
+  el('cInfo').innerHTML = '<b>' + n + ' de ' + defs.length + '</b> etiquetas lidas. Uma foto por etiqueta: a app lê os dados sozinha. Fica à parte do registo do serial e envia-se por e-mail próprio.';
   el('cLista').innerHTML = defs.map(function (d) {
     var r = lidos[d.k], lendo = compLendo[d.k];
     var corpo = '';
@@ -580,7 +580,24 @@ function desenharComponentes() {
     return '<div class="card comp' + (lendo ? ' lendo' : '') + '"><div class="cab"><span class="ico">' + d.icone + '</span><div><b>' + esc(d.nome) + '</b><small>' + (r ? 'Lida em ' + esc(r.lidoEm || '') : 'Por ler') + '</small></div></div>' + corpo +
       '<div class="linha"><label class="botao">📷 ' + (r ? 'Nova foto' : 'Tirar foto') + '<input type="file" accept="image/*" capture="environment" onchange="fotoComponente(this,\'' + d.k + '\')" hidden></label>' +
       '<label class="botao sec">🖼 Galeria<input type="file" accept="image/*" onchange="fotoComponente(this,\'' + d.k + '\')" hidden></label></div></div>';
-  }).join('');
+  }).join('') + cartaoEnvioComp(n);
+}
+function cartaoEnvioComp(n) {
+  var inf = compInfo[compTipo] || {}, guard = localStorage.getItem('emailComp') || localStorage.getItem('ultimoEmail') || '';
+  return '<div class="card"><label>📧 ENVIAR POR E-MAIL <small>(PDF só com as etiquetas dos componentes)</small></label>' +
+    '<input id="cEmail" type="email" autocomplete="email" placeholder="email@exemplo.pt (vários separados por vírgula)" value="' + esc(guard) + '">' +
+    '<button class="botao" style="margin-top:8px" onclick="enviarComponentes()"' + (n ? '' : ' disabled') + '>📧 Enviar etiquetas (' + n + ')</button>' +
+    '<p class="dica" id="cEnvMsg">' + (inf.enviadoEm ? '✔ Enviado em ' + esc(inf.enviadoEm) + ' para ' + esc(inf.enviadoPara) : (n ? 'Se deixar o e-mail vazio, vai para o e-mail habitual.' : 'Leia primeiro as etiquetas.')) + '</p></div>';
+}
+function enviarComponentes() {
+  var s = el('cSerial').value.trim().toUpperCase(), em = el('cEmail').value.trim();
+  if (!s) return alert('Escreva o SERIAL NO.');
+  try { if (em) localStorage.setItem('emailComp', em); } catch (e) {}
+  el('cEnvMsg').textContent = '⏳ A preparar o PDF e a enviar…';
+  api('enviarComponentes', { serial: s, tipo: compTipo, emails: em }).then(function (r) {
+    compInfo[compTipo] = compInfo[compTipo] || {}; compInfo[compTipo].enviadoEm = r.enviadoEm; compInfo[compTipo].enviadoPara = r.enviadoPara;
+    el('cEnvMsg').textContent = '✔ Enviado para ' + r.enviadoPara; if (navigator.vibrate) navigator.vibrate(60);
+  }).catch(function (e) { el('cEnvMsg').textContent = '❌ ' + e.message; });
 }
 function fotoComponente(input, k) {
   if (!input.files.length) return;
@@ -591,7 +608,7 @@ function fotoComponente(input, k) {
     compLendo[k] = true; desenharComponentes();
     api('lerComponente', { serial: s, grupo: el('cGrupo').value.trim().toUpperCase(), tipo: compTipo, comp: k, base64: d.split(',')[1] })
       .then(function (r) {
-        compPastaId = r.pastaId; compDados[compTipo] = compDados[compTipo] || {};
+        compDados[compTipo] = compDados[compTipo] || {};
         r.registo.fotoUrl = d; compDados[compTipo][k] = r.registo;
         if (navigator.vibrate) navigator.vibrate(60);
       })
@@ -608,13 +625,13 @@ function corrigirComponente(k) {
 }
 function guardarCorrecaoComp(k) {
   var campos = el('cEdTxt').value.split('\n').map(function (l) { var i = l.indexOf(':'); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim()] : null; }).filter(function (c) { return c && c[0] && c[1]; });
-  api('componenteCorrigir', { pastaId: compPastaId, tipo: compTipo, comp: k, campos: campos, modelo: el('cEdMod').value, serial: el('cEdSer').value })
+  api('componenteCorrigir', { serial: el('cSerial').value.trim().toUpperCase(), tipo: compTipo, comp: k, campos: campos, modelo: el('cEdMod').value, serialComp: el('cEdSer').value })
     .then(function (r) { var f = compDados[compTipo][k].fotoUrl; r.registo.fotoUrl = f; compDados[compTipo][k] = r.registo; desenharComponentes(); })
     .catch(function (e) { alert('❌ ' + e.message); });
 }
 function apagarComponente(k) {
   if (!confirm('Apagar a leitura desta etiqueta?')) return;
-  api('componenteCorrigir', { pastaId: compPastaId, tipo: compTipo, comp: k, apagar: true })
+  api('componenteCorrigir', { serial: el('cSerial').value.trim().toUpperCase(), tipo: compTipo, comp: k, apagar: true })
     .then(function () { delete compDados[compTipo][k]; desenharComponentes(); }).catch(function (e) { alert('❌ ' + e.message); });
 }
 
