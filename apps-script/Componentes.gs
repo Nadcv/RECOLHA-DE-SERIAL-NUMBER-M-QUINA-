@@ -461,27 +461,41 @@ function compExportar_(id, mime) {
   } finally { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) {} }
 }
 
-/** Word (.docx): o mesmo documento técnico, editável, com as fotografias das etiquetas em anexo. */
-function compDocx_(serial, tipo, d, ks, user, pasta) {
-  const html = compHtml_(serial, tipo, d, ks, user, true);
-  const f = Drive.Files.create({ name: 'tmp_etc_' + serial, mimeType: MimeType.GOOGLE_DOCS, parents: [pasta.getId()] },
-                               Utilities.newBlob(html, 'text/html', 'doc.html'));
+/**
+ * HTML → Word (.docx) mantendo as imagens: o Google Docs descarta as imagens embutidas (data:),
+ * por isso cada uma é trocada por uma marca e, depois da conversão, a imagem é posta no mesmo sítio.
+ */
+function docxComImagens_(html, pasta) {
+  const imgs = [];
+  const h2 = String(html).replace(/<img\b[^>]*?src="data:([^;"]+);base64,([^"]+)"[^>]*>/gi, (tag, mime, b64) => {
+    const alt = (tag.match(/height:\s*(\d+)px/i) || [])[1], larg = /class="fig"/i.test(tag) ? 220 : (tag.match(/max-width:\s*(\d+)px/i) || [])[1];
+    imgs.push({ mime, b64, h: alt ? Number(alt) : 0, w: larg ? Number(larg) : 220 });
+    return '<span>[[IMG' + (imgs.length - 1) + ']]</span>';
+  });
+  const f = Drive.Files.create({ name: 'tmp_docx', mimeType: MimeType.GOOGLE_DOCS, parents: [pasta.getId()] }, Utilities.newBlob(h2, 'text/html', 'doc.html'));
   try {
     const doc = DocumentApp.openById(f.id), body = doc.getBody();
-    body.appendPageBreak();
-    body.appendParagraph('ANEXO – FOTOGRAFIAS DAS ETIQUETAS').setHeading(DocumentApp.ParagraphHeading.HEADING2);
-    ks.forEach((k, i) => {
-      const r = d.itens[k];
-      if (!r.fotoId) return;
+    imgs.forEach((im, i) => {
       try {
-        body.appendParagraph('Fig. ' + (i + 1) + ' – ' + r.nome).setBold(true);
-        const im = body.appendParagraph('').appendInlineImage(miniatura_(DriveApp.getFileById(r.fotoId), 900));
-        const w = 300, k2 = w / im.getWidth(); im.setWidth(w).setHeight(Math.round(im.getHeight() * k2));
-      } catch (e) { Logger.log('Foto no Word: ' + e.message); }
+        const r = body.findText('\\[\\[IMG' + i + '\\]\\]');
+        if (!r) return;
+        const t = r.getElement().asText();
+        t.deleteText(r.getStartOffset(), r.getEndOffsetInclusive());
+        const par = t.getParent();
+        const img = par.appendInlineImage(Utilities.newBlob(Utilities.base64Decode(im.b64), im.mime, 'img' + i));
+        const w0 = img.getWidth(), h0 = img.getHeight();
+        if (im.h) { img.setHeight(im.h).setWidth(Math.round(w0 * im.h / h0)); }
+        else if (w0 > im.w) { img.setWidth(im.w).setHeight(Math.round(h0 * im.w / w0)); }
+      } catch (e) { Logger.log('Imagem no Word: ' + e.message); }
     });
     doc.saveAndClose();
-  } catch (e) { Logger.log('Word (fotos): ' + e.message); }
+  } catch (e) { Logger.log('Word (imagens): ' + e.message); }
   return compExportar_(f.id, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+}
+
+/** Word (.docx): o mesmo documento técnico, editável, com as fotografias de cada etiqueta no sítio. */
+function compDocx_(serial, tipo, d, ks, user, pasta) {
+  return docxComImagens_(compHtml_(serial, tipo, d, ks, user, false), pasta);
 }
 
 /** Excel (.xlsx): resumo dos componentes + todos os dados (componente, secção, campo, valor). */
