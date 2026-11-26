@@ -21,8 +21,17 @@ const COMPONENTES_ = {
       dica: 'Controlador Optyma Plus: etiqueta com código de barras e a versão PV/SW.',
       ia: 'Controlador eletrónico (ex.: Danfoss Optyma Plus). Campos típicos: modelo/nome (ex.: Optyma Plus Controller), código (ex.: 084B8080), número da etiqueta de código de barras (ex.: 084B8080021106CC102 ou 084B8080016807CC196 – é o "serial"), versão do firmware tal como está escrita (ex.: PV06/SW3.61 ou PV07/SW3.70 – campo "Versão"), alimentação (ex.: 230V AC). Ignora os números dos bornes e as etiquetas dos fios (ex.: UC4).' },
   ],
-  // Etiquetas dos Clicos: a preencher com as fotos dos componentes do Clico
-  clico: [],
+  clico: [
+    { k: 'evaporador', nome: 'Evaporador (com resistências)', icone: '❄️',
+      dica: 'Placa do evaporador (ex.: Centauro ERC 16/6818): modelo, nº de série, resistências, Ps / Pt.',
+      ia: 'Placa de um evaporador (ex.: Centauro, Made in Portugal). Campos típicos: Modelo (ex.: ERC 16/6818), descrição do modelo (ex.: DI+BR-8,64kW (Nomotor)), N.Serie / Serial Number (ex.: 260120580 – é o "serial"), Motor [W] [A] [V] [Hz] (pode estar vazio "-"), Resist./Heaters [W] [A] [V] [fase] (ex.: 6 x 1440 W, 6 x 6,26 A, 230 V, 1~ – regista "Resistências potência", "Resistências corrente", "Resistências tensão", "Resistências fase"), Ps (bar), Pt (bar), Ts min/max. Se houver o autocolante verde de controlo de qualidade, regista só a data escrita à mão como "Controlo de qualidade (data)". Ignora morada, telefone e site.' },
+    { k: 'ventilador', nome: 'Ventilador', icone: '🌀',
+      dica: 'Etiqueta do ventilador (ex.: Ziehl-Abegg FN040-6IW.BD.A7P1): P/N, tipo, S/N.',
+      ia: 'Etiqueta circular de um ventilador (ex.: Ziehl-Abegg, Made in Germany; o texto pode estar em arco ou rodado). Campos típicos: P/N (ex.: 169535), tipo/modelo (ex.: FN040-6IW.BD.A7P1 – é o "modelo"), S/N (ex.: 33188323/005 – é o "serial"), data/lote (ex.: 22/25 812), tensão/frequência (ex.: 1~ 200-277V 50/60Hz), potência P1 (W), corrente (A), rotação (rpm), temperatura máx., IP, classe térmica (ex.: THCL 155), eletrónica (ex.: ECblue basic incl. MODBUS), ErP (ex.: ErP 2015 (N40) N=58,5 statA=49,5%), "VSD integrated". Ignora o número gravado no metal fora da etiqueta.' },
+    { k: 'sonda', nome: 'Sonda de humidade / temperatura', icone: '💧',
+      dica: 'Etiqueta da caixa da sonda (ex.: Rotronic HygroClip2): ART, nº, EAN.',
+      ia: 'Etiqueta da caixa de uma sonda de humidade e temperatura (ex.: Rotronic HygroClip2 Advanced, Switzerland). Campos típicos: fabricante (ex.: rotronic, CH-8303 Bassersdorf), produto (ex.: HygroClip2 Advanced – HC2A), ART (ex.: XD33A-S3X – é o "modelo"/"codigo"), número junto ao código de barras de cima (ex.: 26057209 – é o "serial"), EAN (ex.: 7611990502097), Country of origin. Ignora os textos publicitários em várias línguas.' },
+  ],
 };
 
 function compDef_(tipo, k) {
