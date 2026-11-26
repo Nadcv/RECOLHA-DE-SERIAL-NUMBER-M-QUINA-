@@ -92,21 +92,108 @@ function apiLerComponente_(pin, req) {
   while (files.hasNext()) { const f = files.next(); if (f.getName().indexOf(prefixo) === 0) f.setTrashed(true); }
   const ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
   const foto = pasta.createFile(Utilities.newBlob(Utilities.base64Decode(req.base64), 'image/jpeg', prefixo + ts + '.jpg'));
-  let r;
+  let r, motivoIA = '';
   try { r = lerComponenteIA_(def, foto); }
   catch (e) {
-    Logger.log('Leitura do componente falhou: ' + e.message);
-    const texto = lerTextoOCR_([foto]);
-    r = { campos: texto.split(/\n+/).map(l => l.trim()).filter(l => l.length > 2).slice(0, 25).map((l, i) => ['Linha ' + (i + 1), l]), fonte: 'OCR' };
+    motivoIA = String(e.message || e).slice(0, 120);
+    Logger.log('Leitura do componente por IA falhou: ' + motivoIA);
+    r = camposOCRComponente_(def.k, lerTextoOCR_([foto]));
   }
   const reg = { nome: def.nome, fabricante: r.fabricante || '', modelo: r.modelo || '', codigo: r.codigo || '', serial: r.serial || '',
                 ano: r.ano || '', campos: (r.campos || []).slice(0, 40), fonte: r.fonte || '', fotoId: foto.getId(),
-                lidoEm: agora_(), por: (user && user.nome) || '' };
+                lidoEm: agora_(), por: (user && user.nome) || '', motivoIA };
   const d = compLer_(pasta) || { serial, tipo, itens: {} };
   d.grupo = String(req.grupo || d.grupo || '').trim().toUpperCase().slice(0, 30);
   d.itens = d.itens || {}; d.itens[def.k] = reg; d.atualizadoEm = agora_();
   compGuardar_(pasta, d);
   return { tipo, comp: def.k, registo: reg };
+}
+
+/* ---------- Leitura sem IA: reconhece os campos de cada etiqueta no texto do OCR ---------- */
+function camposOCRComponente_(k, texto) {
+  const t = String(texto || '').replace(/\r/g, '');
+  const c = [], out = { fonte: 'OCR', campos: c };
+  const add = (nome, v) => { v = String(v || '').replace(/\s+/g, ' ').trim(); if (v && !c.some(x => x[0] === nome)) c.push([nome, v]); return v; };
+  const m = (re, g) => { const r = t.match(re); return r ? (r[g || 1] || '').trim() : ''; };
+  const todos = re => (t.match(re) || []).map(x => x.replace(/\s+/g, ' ').trim()).filter((v, i, a) => a.indexOf(v) === i);
+  if (k === 'deposito') {
+    if (/RIGOMEC/i.test(t)) out.fabricante = add('Fabricante', 'Frigomec (Legnago, Itália)');
+    out.modelo = add('Tipo (Type)', m(/\b(RV-[A-Z0-9\/\-]+)/i));
+    out.serial = add('Nº de fabrico (Manufacture Nr.)', m(/^\s*(\d{6,8})\s*$/m));
+    out.ano = add('Ano de fabrico', m(/\b((?:0[1-9]|1[0-2])\/20\d{2})\b/));
+    add('Grupo de fluidos', m(/Fluids\s*Group[^\d\n]*([12](?:\s*[\/ ]\s*[12])?)/i));
+    add('Excluído', m(/Excluded\s*(R\d{3,4}[A-Z]?)/i));
+    add('Volume', (m(/^\s*(\d{1,3}[.,]\d)\s*$/m) || m(/Volume[^\d\n]*(\d+[.,]?\d*)/i)) ? (m(/^\s*(\d{1,3}[.,]\d)\s*$/m) || m(/Volume[^\d\n]*(\d+[.,]?\d*)/i)) + ' L' : '');
+    add('Temperatura TS (°C)', m(/(-\d{1,2}\s+\d{2,3}\s+-\d{1,2}\s+\d{2,3})/));
+    add('Pressão máx. PS (bar)', m(/(-1\s*\/\s*\d{2}\s+\d{2})/));
+    add('Pressão de teste PT (bar)', m(/(\d{2}[.,]\d{1,2})\s*Mat/i) || m(/Test\s*press[^\d\n]*(\d{2}[.,]\d{1,2})/i));
+    add('Material do corpo', m(/Mat\.?\s*Body\s*:?\s*([A-Za-z ]+?)(?:\n|$)/i));
+    add('Marcação CE (organismo)', m(/^\s*(0\d{3})\s*$/m));
+  } else if (k === 'compressor') {
+    if (/Danfoss/i.test(t)) out.fabricante = add('Fabricante', 'Danfoss');
+    out.modelo = add('Modelo (Model no)', m(/Model\s*no\.?\s*:?\s*([A-Z0-9]{8,})/i) || m(/\b([LM]LZ\d{3}[A-Z0-9]{4,})\b/));
+    out.serial = add('Nº de série (Serial no)', m(/Serial\s*no\.?\s*:?\s*([A-Z]{2}\d{8,})/i) || m(/\b([A-Z]{2}\d{10})\b/));
+    add('Tech no', m(/Tech\s*no\.?\s*:?\s*([A-Z0-9]{6,})/i));
+    add('Alimentação', todos(/\d{3}(?:\s*-\s*\d{3})?\s*V\s*3\s*~\s*\d{2}\s*Hz/gi).join(' · '));
+    add('Corrente de arranque (LR)', m(/LR\s*:?\s*(\d+\s*A)/i));
+    add('Corrente máx. (MAX OPER)', m(/MAX\s*OPER\.?\s*:?\s*([\d.,]+\s*A)/i));
+    add('Óleo (Lubricant)', m(/Lubricant\s*:?\s*([A-Z]+\s*\/\s*[\d.,]+\s*L)/i));
+    add('Refrigerante', m(/Refrigerant\s*:?\s*([^\n]+)/i));
+    const ps = t.match(/PS\s+([\d.,]+\s*bar)\s+([\d.,]+\s*bar)/i);
+    if (ps) { add('PS lado LP', ps[1]); add('PS lado HP', ps[2]); }
+    add('Fabricado em', m(/MADE\s*IN\s*([A-Z]+)/i));
+  } else if (k === 'unidade') {
+    if (/Danfoss/i.test(t) || /114X\d{4}/.test(t)) out.fabricante = add('Fabricante', 'Danfoss');
+    out.modelo = add('Modelo', m(/\b(OP-[A-Z0-9]{8,})/));
+    out.codigo = add('Código', m(/\b(114X\d{4})\b/));
+    out.serial = add('Nº de série', m(/Serial\s*No\.?[:\-.\s]*([A-Z0-9]{8,})/i) || m(/\b(HTPL[\d-]+)/));
+    add('EAN', m(/\b(\d{13})\b/));
+    add('Alimentação', m(/(\d{3}\s*V\s*3N?\s*~\s*\d{2}\s*Hz)/i));
+    add('Refrigerantes (1)', m(/\(1\)\s*([^\n(]+)/));
+    add('Refrigerantes (2)', m(/\(2\)\s*([^\n]+)/));
+    add('Desenho (DW)', m(/DW\s*:?\s*-?\s*([A-Z0-9]+(?:\s*REV\.?\s*\d+)?)/i));
+    const dt = m(/DATE\s*:?\s*-?\s*(\d{2}-\d{2}-\d{4})/i); if (dt) { add('Data', dt); out.ano = dt.slice(-4); }
+    add('Fabricado em', m(/MADE\s*IN\s*([A-Z]+)/i));
+  } else if (k === 'ventilador') {
+    out.fabricante = add('Fabricante', /ebm/i.test(t) ? 'ebm-papst' : /Hidria/i.test(t) ? 'Hidria (Eslovénia)' : /ZIEHL|FN0\d{2}/i.test(t) ? 'Ziehl-Abegg (Alemanha)' : '');
+    out.modelo = add('Modelo', m(/\b(A\dE\d{3}-[A-Z0-9]+-\d+)\b/) || m(/\b(R\d{2}E-[A-Z0-9-]{6,})/) || m(/\b(FN\d{3}-[A-Z0-9.]+)/));
+    add('P/N', m(/P\/N\s*:?\s*(\d{5,})/i));
+    out.serial = add('Nº de série', m(/S\/N\s*:?\s*([\d\/]{6,})/i) || m(/\b(22\d{8}|0\d{7})\b/));
+    add('Código Danfoss', m(/(118A\d{4}\s*\/\s*118U\d{4})/));
+    add('Alimentação', m(/(1\s*~\s*\d{3}(?:\s*-\s*\d{3})?\s*V[^\n]*?Hz)/i) || todos(/\d{3}V\s+\d{2}Hz\s*[\d.,]+A/gi).join(' · '));
+    add('Potência', todos(/\b\d{2,4}\s*W\b/g).join(' · '));
+    add('Corrente', m(/\b([\d.,]+(?:\s*-\s*[\d.,]+)?\s*A)\b/));
+    add('Rotação', todos(/\b\d{3,4}\s*(?:RPM|rpm|min)/g).join(' · '));
+    add('Proteção', m(/\b(IP\s?\d{2})\b/));
+    add('Data / lote', m(/\b(\d{2}\/\d{2}(?:\s+\d{3})?)\b/));
+    if (/VSD/i.test(t)) add('Velocidade variável', 'VSD integrado');
+  } else if (k === 'controlador') {
+    if (/Danfoss|Optyma|084B/i.test(t)) out.fabricante = add('Fabricante', 'Danfoss');
+    out.modelo = add('Modelo', /Optyma/i.test(t) ? 'Optyma Plus Controller' : '');
+    out.codigo = add('Código', m(/\b(084B\d{4})\b/));
+    out.serial = add('Nº da etiqueta (código de barras)', m(/\b(084B\d{4}\d{5,}[A-Z]{2}\d{2,})\b/));
+    add('Versão do firmware', m(/(PV\s?\d{2}\s*\/\s*SW\s*\d[.,\s]?\d{2})/i).replace(/\s+/g, ''));
+    add('Alimentação', m(/(230\s*V\s*AC)/i));
+  } else if (k === 'evaporador') {
+    if (/CENTAURO/i.test(t)) out.fabricante = add('Fabricante', 'Centauro (Portugal)');
+    out.modelo = add('Modelo', m(/Modelo\s*:?\s*([A-Z]{2,4}\s*\d+\/\d+)/i) || m(/\b(ERC\s*\d+\/\d+)/));
+    add('Descrição do modelo', m(/(DI\+BR[^\n]*)/i));
+    out.serial = add('Nº de série', m(/N\.?\s*S[eé]rie\s*:?\s*(\d{6,})/i) || m(/\b(\d{9})\b/));
+    const rz = t.match(/(\d\s*x\s*\d{3,4})\s+(\d\s*x\s*[\d.,]+)\s+(\d{3})/i);
+    if (rz) { add('Resistências – potência (W)', rz[1]); add('Resistências – corrente (A)', rz[2]); add('Resistências – tensão (V)', rz[3]); }
+    add('Pressão Ps', m(/Ps\s*(\d+\s*bar)/i));
+    add('Pressão Pt', m(/Pt\s*(\d+\s*bar)/i));
+  } else if (k === 'sonda') {
+    if (/rotronic/i.test(t)) out.fabricante = add('Fabricante', 'Rotronic (Suíça)');
+    add('Produto', /HYGROCLIP/i.test(t) ? 'HygroClip2 Advanced (HC2A)' : '');
+    out.modelo = add('Artigo (ART)', m(/ART\s*:?\s*([A-Z0-9]+\s*-\s*[A-Z0-9]+|[A-Z0-9-]{5,})/i).replace(/\s+/g, ''));
+    out.serial = add('Nº', m(/\b(\d{8})\b/));
+    add('EAN', m(/\b(\d{13})\b/));
+    add('País de origem', m(/Country\s*of\s*origin\s*:?\s*([A-Za-z]+)/i));
+  }
+  if (c.length < 3 && t.trim()) add('Texto lido na etiqueta', t.split(/\n+/).map(l => l.trim()).filter(l => l.length > 1).join(' · ').slice(0, 500));
+  ['modelo', 'serial', 'fabricante', 'codigo', 'ano'].forEach(x => { if (!out[x]) delete out[x]; });
+  return out;
 }
 
 function lerComponenteIA_(def, foto) {
@@ -244,22 +331,35 @@ function apiEnviarComponentes_(pin, req) {
   return { enviadoPara: para, enviadoEm: d.enviadoEm };
 }
 
-/** PDF (HTML → PDF) com uma tabela e a foto de cada componente. */
+/** PDF (HTML → PDF): resumo por componente (fabricante, modelo, nº de série, ano) + dados + foto. */
 function compPdf_(serial, tipo, d, ks) {
-  const e = esc_;
-  let h = '<html><head><meta charset="utf-8"><style>@page{size:A4;margin:14mm 12mm}body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#222}' +
-    'h1{font-size:15pt;margin:0;color:#3a393a}.sub{font-size:9pt;color:#666}h2{font-size:11pt;margin:14px 0 4px;color:#c9272e}' +
-    'table.d{width:100%;border-collapse:collapse}table.d td{border-bottom:1px solid #ddd;padding:3px 4px;vertical-align:top}table.d td.n{width:38%;font-weight:bold;color:#333}' +
-    '.bloco{page-break-inside:avoid;margin-bottom:6px}.foto{max-width:260px;max-height:200px;border:1px solid #ddd;margin-top:4px}</style></head><body>' +
-    '<table style="width:100%;border-bottom:2px solid #c9272e;margin-bottom:10px"><tr><td style="padding-bottom:8px"><img src="' + logoDataUri_('cablotec') + '" style="height:34px"></td>' +
-    '<td style="text-align:right;padding-bottom:8px"><h1>Etiquetas dos componentes – ' + (tipo === 'clico' ? 'Clico' : 'Grupo') + '</h1>' +
-    '<div class="sub">SERIAL NO: <b style="color:#c9272e">' + e(serial) + '</b>' + (d.grupo ? ' · ' + e(d.grupo) : '') + ' · ' + agora_() + '</div></td></tr></table>';
+  const e = esc_, nomeTipo = tipo === 'clico' ? 'Clico' : 'Grupo';
+  let h = '<html><head><meta charset="utf-8"><style>@page{size:A4;margin:13mm 12mm}body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#222}' +
+    'h1{font-size:15pt;margin:0;color:#3a393a}.sub{font-size:9pt;color:#666}' +
+    'table{border-collapse:collapse}.res{width:100%;margin:6px 0 4px}.res th{color:#3a393a;border-bottom:1.5px solid #3a393a;font-size:8.5pt;text-align:left;padding:5px 6px}' +
+    '.res td{border-bottom:1px solid #ddd;padding:5px 6px;font-size:9pt}.res td.s{font-family:Courier New,monospace;color:#c9272e;font-weight:bold}' +
+    '.bloco{page-break-inside:avoid;margin-top:12px;border:1px solid #ddd;border-left:4px solid #c9272e;padding:8px 10px}' +
+    '.bloco h2{font-size:11pt;margin:0 0 6px;color:#3a393a}.chips td{padding:0 14px 6px 0;vertical-align:top}.chips small{display:block;color:#888;font-size:7.5pt;text-transform:uppercase}' +
+    '.chips b{font-size:10pt}.d{width:100%}.d td{border-top:1px solid #eee;padding:3px 4px;vertical-align:top;font-size:8.8pt}.d td.n{width:42%;color:#555}' +
+    '.foto{max-width:240px;max-height:180px;border:1px solid #ddd}</style></head><body>' +
+    '<table style="width:100%;border-bottom:2px solid #c9272e;margin-bottom:8px"><tr><td style="padding-bottom:8px"><img src="' + logoDataUri_('cablotec') + '" style="height:34px"></td>' +
+    '<td style="text-align:right;padding-bottom:8px"><h1>Etiquetas dos componentes – ' + nomeTipo + '</h1>' +
+    '<div class="sub">SERIAL NO: <b style="color:#c9272e">' + e(serial) + '</b>' + (d.grupo ? ' · ' + e(d.grupo) : '') + ' · Emitido em ' + agora_() + '</div></td></tr></table>' +
+    '<table class="res"><tr><th>Componente</th><th>Fabricante</th><th>Modelo</th><th>Nº de série</th></tr>' +
+    ks.map(k => { const r = d.itens[k]; return '<tr><td><b>' + e(r.nome) + '</b></td><td>' + e(r.fabricante || '—') + '</td><td>' + e(r.modelo || '—') + '</td><td class="s">' + e(r.serial || '—') + '</td></tr>'; }).join('') + '</table>';
   ks.forEach(k => {
     const r = d.itens[k];
     let img = '';
     try { if (r.fotoId) { const b = miniatura_(DriveApp.getFileById(r.fotoId), 700); img = '<img class="foto" src="data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes()) + '">'; } } catch (x) {}
-    h += '<div class="bloco"><h2>' + e(r.nome) + (r.fabricante ? ' – ' + e(r.fabricante) : '') + '</h2><table class="d">' +
-      (r.campos || []).map(c => '<tr><td class="n">' + e(c[0]) + '</td><td>' + e(c[1]) + '</td></tr>').join('') + '</table>' + img + '</div>';
+    const chips = [['Fabricante', r.fabricante], ['Modelo', r.modelo], ['Código', r.codigo], ['Nº de série', r.serial], ['Ano', r.ano]].filter(x => x[1]);
+    const resumoNomes = /^(Fabricante|Modelo|Nº de série|Código)/i;
+    const dados = (r.campos || []).filter(c => !(resumoNomes.test(c[0]) && chips.some(x => x[1] === c[1])));
+    h += '<div class="bloco"><h2>' + e(r.nome) + '</h2>' +
+      (chips.length ? '<table class="chips"><tr>' + chips.map(x => '<td><small>' + x[0] + '</small><b' + (x[0] === 'Nº de série' ? ' style="color:#c9272e"' : '') + '>' + e(x[1]) + '</b></td>').join('') + '</tr></table>' : '') +
+      '<table style="width:100%"><tr><td style="vertical-align:top;padding-right:10px">' +
+      (dados.length ? '<table class="d">' + dados.map(c => '<tr><td class="n">' + e(c[0]) + '</td><td>' + e(c[1]) + '</td></tr>').join('') + '</table>' : '') +
+      '<div style="font-size:7.5pt;color:#999;margin-top:4px">Lida em ' + e(r.lidoEm || '') + (r.por ? ' por ' + e(r.por) : '') + (r.fonte === 'OCR' ? ' · leitura de texto' : r.fonte === 'IA' ? ' · leitura por IA' : '') + (r.corrigido ? ' · corrigida à mão' : '') + '</div>' +
+      '</td><td style="width:245px;vertical-align:top;text-align:right">' + img + '</td></tr></table></div>';
   });
   h += '<p style="margin-top:14px;font-size:8pt;color:#888;border-top:1px solid #ddd;padding-top:6px">Cablotec – Cablagens e Sistemas, Lda · Documento gerado pela Aplicação Cablotec</p></body></html>';
   return HtmlService.createHtmlOutput(h).getAs(MimeType.PDF);
