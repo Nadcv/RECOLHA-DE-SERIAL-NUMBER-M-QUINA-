@@ -77,6 +77,22 @@
   nav button { flex:1; border:0; background:none; padding:8px 0 10px; font-size:11px; color:#777; font-weight:600; position:relative; }
   nav button span { display:block; font-size:22px; margin-bottom:2px; }
   nav button.ativo { color:var(--azul); }
+  nav button { font-size:10px; } nav button span { font-size:20px; }
+  .comp { position:relative; }
+  .comp .cab { display:flex; align-items:center; gap:10px; }
+  .comp .cab .ico { font-size:26px; }
+  .comp .cab b { display:block; font-size:16px; }
+  .comp .cab small { color:#777; font-size:12px; }
+  .comp .estado-c { margin:8px 0; font-size:13px; }
+  .comp .ok { color:#188038; font-weight:700; }
+  .comp table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  .comp th { text-align:left; color:#555; font-weight:600; padding:4px 6px 4px 0; width:42%; vertical-align:top; border-top:1px solid #eee; }
+  .comp td { padding:4px 0; border-top:1px solid #eee; word-break:break-word; }
+  .comp .mini { width:64px; height:64px; object-fit:cover; border-radius:8px; float:right; margin-left:8px; }
+  .comp .acoes-c { display:flex; gap:8px; margin-top:8px; }
+  .comp .acoes-c .botao { margin:0; flex:1; padding:10px 6px; font-size:14px; }
+  .comp textarea { min-height:140px; font-size:14px; }
+  .comp.lendo { opacity:.7; }
   textarea { width:100%; font-size:16px; padding:10px 12px; border:1px solid #ccc; border-radius:8px; font-family:inherit; min-height:70px; }
   .campo-ic { display:flex; gap:8px; align-items:stretch; }
   .campo-ic input { flex:1; }
@@ -203,6 +219,21 @@
   </div>
   <button id="btGuardar" class="botao" onclick="guardar()">✅ Guardar</button>
   <div id="estado"></div>
+</section>
+
+<!-- ============ ETIQUETAS DOS COMPONENTES (Grupo / Clico) ============ -->
+<section id="e-componentes" class="ecra">
+  <div class="card destaque">
+    <label>SERIAL NO <small>(da máquina)</small></label>
+    <div class="campo-ic">
+      <input id="cSerial" class="grande" autocapitalize="characters" autocomplete="off" placeholder="ex: 162744" onchange="carregarComponentes()">
+      <button class="ic" title="Ler código" onclick="abrirScanner('cSerial')">▥</button>
+    </div>
+    <label class="sep">INFORMAÇÃO DO GRUPO <small>(opcional)</small></label>
+    <input id="cGrupo" class="maius" autocapitalize="characters" autocomplete="off" placeholder="ex: 46 VM" list="grupos">
+    <p class="dica" id="cInfo">Uma foto por etiqueta: a app lê os dados sozinha e junta-os à ficha e ao PDF deste serial.</p>
+  </div>
+  <div id="cLista"></div>
 </section>
 
 <!-- ============ RESULTADO ============ -->
@@ -341,13 +372,15 @@
 
 <nav>
   <button data-ecra="registar" onclick="mostrar('registar')"><span>📷</span>Registar</button>
+  <button data-ecra="compGrupo" onclick="mostrar('compGrupo')"><span>🏭</span>Grupo</button>
+  <button data-ecra="compClico" onclick="mostrar('compClico')"><span>❄️</span>Clico</button>
   <button data-ecra="lista" onclick="mostrar('lista')"><span>📋</span>Lista<i id="badge" class="badge"></i></button>
   <button data-ecra="painel" onclick="mostrar('painel')"><span>📊</span>Painel</button>
   <button data-ecra="definicoes" onclick="mostrar('definicoes')"><span>⚙️</span>Definições</button>
 </nav>
 
 <script>
-var VERSAO = '1.4.8';
+var VERSAO = '1.5.0';
 var cfg = { url: localStorage.getItem('url') || '', pin: localStorage.getItem('pin') || '',
             nome: localStorage.getItem('nome') || '', admin: !!localStorage.getItem('admin') };
 var fotos = { 1: null, 2: null, 3: null };
@@ -361,11 +394,14 @@ function estado(t, erro) { el('estado').innerHTML = t || ''; el('estado').classN
 
 /* ---------------- Navegação ---------------- */
 var TITULOS = { registar:'📷 Registar serial', resultado:'✔ Registado', lista:'📋 Registos', definicoes:'⚙️ Definições',
-                enviar:'✉️ Enviar relatório', editar:'✏️ Rever dados', painel:'📊 Painel' };
+                enviar:'✉️ Enviar relatório', editar:'✏️ Rever dados', painel:'📊 Painel',
+                compGrupo:'🏭 Etiquetas do Grupo', compClico:'❄️ Etiquetas do Clico' };
 var NAV_DE = { resultado:'registar', enviar:'lista', editar:'lista' };
 function mostrar(nome) {
   if (nome !== 'definicoes' && (!cfg.url || !cfg.pin)) nome = 'definicoes';
-  document.querySelectorAll('.ecra').forEach(function (s) { s.classList.toggle('ativo', s.id === 'e-' + nome); });
+  var ecra = (nome === 'compGrupo' || nome === 'compClico') ? 'componentes' : nome;
+  document.querySelectorAll('.ecra').forEach(function (s) { s.classList.toggle('ativo', s.id === 'e-' + ecra); });
+  if (ecra === 'componentes') abrirComponentes(nome === 'compClico' ? 'clico' : 'grupo');
   document.querySelectorAll('nav button').forEach(function (b) {
     b.classList.toggle('ativo', b.dataset.ecra === nome || NAV_DE[nome] === b.dataset.ecra);
   });
@@ -499,6 +535,88 @@ function desenharFotos() {
   });
 }
 function remover(s) { fotos[s] = null; desenharFotos(); }
+
+/* ---------------- Etiquetas dos componentes (Grupo / Clico) ---------------- */
+var compTipo = 'grupo', compDefs = null, compDados = {}, compPastaId = '', compLendo = {};
+function abrirComponentes(tipo) {
+  compTipo = tipo;
+  if (!el('cSerial').value && el('serial').value) el('cSerial').value = el('serial').value.trim().toUpperCase();
+  if (!el('cGrupo').value && el('grupo').value) el('cGrupo').value = el('grupo').value.trim().toUpperCase();
+  if (!compDefs) {
+    el('cLista').innerHTML = '<div class="card"><p class="dica">A carregar…</p></div>';
+    api('componentes', { serial: el('cSerial').value.trim() }).then(function (r) {
+      compDefs = r.defs; compDados = r.componentes || {}; compPastaId = r.pastaId || ''; desenharComponentes();
+    }).catch(function (e) { el('cLista').innerHTML = '<div class="card"><p class="erro">❌ ' + esc(e.message) + '</p></div>'; });
+  } else desenharComponentes();
+}
+function carregarComponentes() {
+  var s = el('cSerial').value.trim().toUpperCase(); el('cSerial').value = s;
+  compDados = {}; compPastaId = ''; if (!compDefs) return abrirComponentes(compTipo);
+  desenharComponentes();
+  if (!s) return;
+  api('componentes', { serial: s }).then(function (r) { compDados = r.componentes || {}; compPastaId = r.pastaId || ''; desenharComponentes(); }).catch(function () {});
+}
+function desenharComponentes() {
+  var defs = (compDefs || {})[compTipo] || [], lidos = compDados[compTipo] || {};
+  if (!defs.length) {
+    el('cInfo').textContent = 'Uma foto por etiqueta: a app lê os dados sozinha e junta-os à ficha e ao PDF deste serial.';
+    el('cLista').innerHTML = '<div class="card"><p class="dica">' + (compTipo === 'clico' ? 'As etiquetas dos Clicos ainda estão a ser preparadas.' : 'Sem componentes definidos.') + '</p></div>';
+    return;
+  }
+  var n = defs.filter(function (d) { return lidos[d.k]; }).length;
+  el('cInfo').innerHTML = '<b>' + n + ' de ' + defs.length + '</b> etiquetas lidas. Uma foto por etiqueta: a app lê os dados sozinha e junta-os à ficha e ao PDF deste serial.';
+  el('cLista').innerHTML = defs.map(function (d) {
+    var r = lidos[d.k], lendo = compLendo[d.k];
+    var corpo = '';
+    if (lendo) corpo = '<p class="estado-c">⏳ A ler a etiqueta…</p>';
+    else if (r) corpo = (r.fotoUrl ? '<img class="mini" src="' + r.fotoUrl + '">' : '') +
+      '<p class="estado-c"><span class="ok">✔ Lida</span>' + (r.modelo ? ' · ' + esc(r.modelo) : '') + (r.serial ? ' · <b>S/N ' + esc(r.serial) + '</b>' : '') +
+      (r.fonte === 'OCR' ? ' <small>(leitura simples – confirme)</small>' : '') + '</p>' +
+      '<details><summary style="cursor:pointer;font-size:13px;color:#555">Ver os ' + (r.campos || []).length + ' campos lidos</summary><table>' +
+      (r.campos || []).map(function (c) { return '<tr><th>' + esc(c[0]) + '</th><td>' + esc(c[1]) + '</td></tr>'; }).join('') + '</table>' +
+      '<div class="acoes-c"><button class="botao sec" onclick="corrigirComponente(\'' + d.k + '\')">✏️ Corrigir</button><button class="botao sec" onclick="apagarComponente(\'' + d.k + '\')">🗑 Apagar</button></div></details>' +
+      '<div id="cEd-' + d.k + '"></div>';
+    else corpo = '<p class="estado-c dica">' + esc(d.dica) + '</p>';
+    return '<div class="card comp' + (lendo ? ' lendo' : '') + '"><div class="cab"><span class="ico">' + d.icone + '</span><div><b>' + esc(d.nome) + '</b><small>' + (r ? 'Lida em ' + esc(r.lidoEm || '') : 'Por ler') + '</small></div></div>' + corpo +
+      '<div class="linha"><label class="botao">📷 ' + (r ? 'Nova foto' : 'Tirar foto') + '<input type="file" accept="image/*" capture="environment" onchange="fotoComponente(this,\'' + d.k + '\')" hidden></label>' +
+      '<label class="botao sec">🖼 Galeria<input type="file" accept="image/*" onchange="fotoComponente(this,\'' + d.k + '\')" hidden></label></div></div>';
+  }).join('');
+}
+function fotoComponente(input, k) {
+  if (!input.files.length) return;
+  var s = el('cSerial').value.trim().toUpperCase();
+  if (!/^[A-Z0-9./]{2,30}$/.test(s)) { input.value = ''; alert('Escreva primeiro o SERIAL NO da máquina.'); el('cSerial').focus(); return; }
+  var file = input.files[0]; input.value = '';
+  reduzir(file, function (d) {
+    compLendo[k] = true; desenharComponentes();
+    api('lerComponente', { serial: s, grupo: el('cGrupo').value.trim().toUpperCase(), tipo: compTipo, comp: k, base64: d.split(',')[1] })
+      .then(function (r) {
+        compPastaId = r.pastaId; compDados[compTipo] = compDados[compTipo] || {};
+        r.registo.fotoUrl = d; compDados[compTipo][k] = r.registo;
+        if (navigator.vibrate) navigator.vibrate(60);
+      })
+      .catch(function (e) { alert('❌ Não foi possível ler: ' + e.message); })
+      .then(function () { delete compLendo[k]; desenharComponentes(); });
+  });
+}
+function corrigirComponente(k) {
+  var r = (compDados[compTipo] || {})[k]; if (!r) return;
+  el('cEd-' + k).innerHTML = '<label class="sep">MODELO</label><input id="cEdMod" value="' + esc(r.modelo || '') + '">' +
+    '<label class="sep">Nº DE SÉRIE</label><input id="cEdSer" value="' + esc(r.serial || '') + '">' +
+    '<label class="sep">CAMPOS <small>(um por linha: campo: valor)</small></label><textarea id="cEdTxt">' + esc((r.campos || []).map(function (c) { return c[0] + ': ' + c[1]; }).join('\n')) + '</textarea>' +
+    '<div class="acoes-c"><button class="botao" onclick="guardarCorrecaoComp(\'' + k + '\')">💾 Guardar</button><button class="botao sec" onclick="desenharComponentes()">Cancelar</button></div>';
+}
+function guardarCorrecaoComp(k) {
+  var campos = el('cEdTxt').value.split('\n').map(function (l) { var i = l.indexOf(':'); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim()] : null; }).filter(function (c) { return c && c[0] && c[1]; });
+  api('componenteCorrigir', { pastaId: compPastaId, tipo: compTipo, comp: k, campos: campos, modelo: el('cEdMod').value, serial: el('cEdSer').value })
+    .then(function (r) { var f = compDados[compTipo][k].fotoUrl; r.registo.fotoUrl = f; compDados[compTipo][k] = r.registo; desenharComponentes(); })
+    .catch(function (e) { alert('❌ ' + e.message); });
+}
+function apagarComponente(k) {
+  if (!confirm('Apagar a leitura desta etiqueta?')) return;
+  api('componenteCorrigir', { pastaId: compPastaId, tipo: compTipo, comp: k, apagar: true })
+    .then(function () { delete compDados[compTipo][k]; desenharComponentes(); }).catch(function (e) { alert('❌ ' + e.message); });
+}
 
 /* ---------------- Registar ---------------- */
 function guardar() {
@@ -1008,7 +1126,7 @@ function carregarZXing() {
 function abrirScanner(modo) {
   scan.modo = modo; scan.ultimo = ''; scan.vezes = 0;
   el('scanner').style.display = 'flex';
-  el('scanMsg').textContent = modo === 'serial' ? 'Aponte ao código do serial.' : 'Aponte a cada código de barras da etiqueta, um de cada vez.';
+  el('scanMsg').textContent = (modo === 'serial' || modo === 'cSerial') ? 'Aponte ao código do serial.' : 'Aponte a cada código de barras da etiqueta, um de cada vez.';
   desenharCodigos();
   var video = el('scanVideo');
   var nativo = 'BarcodeDetector' in window;
@@ -1043,10 +1161,10 @@ function lido(texto, formato) {
   // só aceita depois de ler o mesmo valor 2 vezes seguidas (evita leituras erradas)
   if (texto === scan.ultimo) scan.vezes++; else { scan.ultimo = texto; scan.vezes = 1; }
   if (scan.vezes < 2) return;
-  if (scan.modo === 'serial') {
-    el('serial').value = texto.toUpperCase().replace(/[^A-Z0-9./]/g, '').slice(0, 30);
+  if (scan.modo === 'serial' || scan.modo === 'cSerial') {
+    el(scan.modo).value = texto.toUpperCase().replace(/[^A-Z0-9./]/g, '').slice(0, 30);
     if (navigator.vibrate) navigator.vibrate(80);
-    fecharScanner(); return;
+    var m = scan.modo; fecharScanner(); if (m === 'cSerial') carregarComponentes(); return;
   }
   if (codigos.some(function (c) { return c.texto === texto; })) return;
   codigos.push({ texto: texto, formato: String(formato || '').toUpperCase() });

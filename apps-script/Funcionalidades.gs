@@ -422,7 +422,7 @@ function T_(pt, en) { return IDIOMA_ === 'en' ? en : pt; }
 /* ===================== FOTO 3 E ASSINATURA ===================== */
 
 function fotoExtra_(f) {
-  return /^(foto3[_.\s-]|assinatura)/i.test(f.getName());
+  return /^(foto3[_.\s-]|assinatura|comp_)/i.test(f.getName());
 }
 
 /** Na 2.ª folha: foto 3 (equipamento/local) à esquerda e assinatura à direita. */
